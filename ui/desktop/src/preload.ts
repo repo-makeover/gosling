@@ -139,6 +139,9 @@ type ElectronAPI = {
   } | null>;
   readFile: (directory: string) => Promise<FileResponse>;
   readArtifactFile: (filePath: string, baseDirectory?: string) => Promise<ArtifactFileResponse>;
+  readArtifactTitles: (
+    requests: Array<{ filePath: string; baseDirectory?: string }>
+  ) => Promise<Record<string, string>>;
   openArtifactFile: (filePath: string, baseDirectory?: string) => Promise<boolean>;
   revealArtifactFile: (filePath: string, baseDirectory?: string) => Promise<void>;
   writeFile: (directory: string, content: string) => Promise<boolean>;
@@ -237,6 +240,8 @@ const electronAPI: ElectronAPI = {
   readFile: (filePath: string) => ipcRenderer.invoke('read-file', filePath),
   readArtifactFile: (filePath: string, baseDirectory?: string) =>
     ipcRenderer.invoke('read-artifact-file', filePath, baseDirectory),
+  readArtifactTitles: (requests: Array<{ filePath: string; baseDirectory?: string }>) =>
+    ipcRenderer.invoke('read-artifact-titles', requests),
   openArtifactFile: (filePath: string, baseDirectory?: string) =>
     ipcRenderer.invoke('open-artifact-file', filePath, baseDirectory),
   revealArtifactFile: (filePath: string, baseDirectory?: string) =>

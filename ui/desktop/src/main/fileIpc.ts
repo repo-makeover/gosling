@@ -15,6 +15,7 @@ import { canonicalizePotentialPath } from '../utils/rendererFileAccess';
 import { errorMessage } from '../utils/conversionUtils';
 import { expandTilde } from '../utils/pathUtils';
 import { readBoundedSessionImportFile } from '../utils/sessionImport';
+import { documentTitleFromContent, supportsDocumentTitle } from '../utils/documentTitle';
 
 type AssertRendererFileAccess = (webContentsId: number, filePath: string) => Promise<string>;
 type AssertRendererArtifactFileAccess = (
@@ -50,6 +51,7 @@ export const FILE_IPC_CHANNELS = [
   'check-ollama',
   'read-file',
   'read-artifact-file',
+  'read-artifact-titles',
   'open-artifact-file',
   'reveal-artifact-file',
   'write-file',
@@ -282,6 +284,44 @@ export function registerFileIpcHandlers(
           truncated: false,
         };
       }
+    }
+  );
+
+  targetIpcMain.handle(
+    'read-artifact-titles',
+    async (event, requests: Array<{ filePath: string; baseDirectory?: string }>) => {
+      // A list row only needs the document's own heading, so this reads a small
+      // prefix per file instead of the preview reader's multi-megabyte window.
+      const TITLE_PREFIX_BYTES = 16 * 1024;
+      const MAX_FILES = 200;
+      const titles: Record<string, string> = {};
+      for (const request of (requests ?? []).slice(0, MAX_FILES)) {
+        if (!request?.filePath || !supportsDocumentTitle(request.filePath)) continue;
+        try {
+          const resolvedPath = await assertRendererArtifactFileAccess(
+            event.sender.id,
+            request.filePath,
+            request.baseDirectory
+          );
+          const stats = await fs.stat(resolvedPath);
+          if (!stats.isFile()) continue;
+          const bytesToRead = Math.min(stats.size, TITLE_PREFIX_BYTES);
+          if (bytesToRead === 0) continue;
+          const handle = await fs.open(resolvedPath, 'r');
+          const buffer = Buffer.alloc(bytesToRead);
+          try {
+            await handle.read(buffer, 0, bytesToRead, 0);
+          } finally {
+            await handle.close();
+          }
+          const title = documentTitleFromContent(buffer.toString('utf8'));
+          if (title) titles[request.filePath] = title;
+        } catch {
+          // A file the renderer may not read, or that vanished, simply has no
+          // title; the row keeps showing its name.
+        }
+      }
+      return titles;
     }
   );
 

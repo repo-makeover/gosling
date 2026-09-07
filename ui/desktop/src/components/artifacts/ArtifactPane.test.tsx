@@ -32,6 +32,7 @@ vi.mock('../../acp/chatSessionController', () => ({
 describe('ArtifactPane', () => {
   const saveArtifact = vi.fn();
   const readArtifactFile = vi.fn();
+  const readArtifactTitles = vi.fn();
 
   function Harness() {
     const { openContent, openFile, setVisibleSession } = useArtifactWorkbench();
@@ -139,7 +140,9 @@ describe('ArtifactPane', () => {
       sizeBytes: 0,
       truncated: false,
     });
-    Object.assign(window.electron, { readArtifactFile });
+    readArtifactTitles.mockReset();
+    readArtifactTitles.mockResolvedValue({});
+    Object.assign(window.electron, { readArtifactFile, readArtifactTitles });
     vi.mocked(window.electron.getResearchLibraryPath).mockResolvedValue(
       '/Users/tester/Documents/Gosling Research Library'
     );
@@ -223,7 +226,7 @@ describe('ArtifactPane', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'Open file' })[0]);
 
     await waitFor(() => expect(readArtifactFile).toHaveBeenCalledTimes(2), { timeout: 1000 });
-    expect(await screen.findByText('Report')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Report' })).toBeInTheDocument();
   });
 
   it('offers to grant access when a preview stays blocked after retrying', async () => {
@@ -525,6 +528,67 @@ describe('ArtifactPane', () => {
 
     fireEvent.click(screen.getByText('bayesian-neural-networks.md'));
     expect(screen.getByRole('tab', { name: 'Outputs 0' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('shows a document title above its file name in the Library list', async () => {
+    vi.mocked(window.electron.listResearchLibraryFiles).mockResolvedValue({
+      files: [
+        {
+          name: 'NUMERICAL_VALIDATION.md',
+          path: '/library/bounded/NUMERICAL_VALIDATION.md',
+          relativePath: 'bounded/NUMERICAL_VALIDATION.md',
+          sizeBytes: 4_096,
+          modifiedAt: '2026-09-06T12:00:00.000Z',
+        },
+      ],
+      truncated: false,
+    });
+    readArtifactTitles.mockResolvedValue({
+      '/library/bounded/NUMERICAL_VALIDATION.md': 'Numerical source-consistency sweep',
+    });
+
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Library 1' }));
+
+    expect(await screen.findByText('Numerical source-consistency sweep')).toBeInTheDocument();
+    expect(
+      screen.getByText(/bounded\/NUMERICAL_VALIDATION.md · 4 KB/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText('NUMERICAL_VALIDATION.md')).not.toBeInTheDocument();
+  });
+
+  it('keeps the file name when a document carries no title', async () => {
+    vi.mocked(window.electron.listResearchLibraryFiles).mockResolvedValue({
+      files: [
+        {
+          name: 'untitled.md',
+          path: '/library/untitled.md',
+          relativePath: 'untitled.md',
+          sizeBytes: 12,
+          modifiedAt: '2026-09-06T12:00:00.000Z',
+        },
+      ],
+      truncated: false,
+    });
+    readArtifactTitles.mockResolvedValue({});
+
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Library 1' }));
+    expect(await screen.findByText('untitled.md')).toBeInTheDocument();
   });
 
   it('surfaces a truncated Research Library listing', async () => {

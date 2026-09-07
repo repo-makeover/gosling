@@ -42,6 +42,7 @@ import { setSessionInputSelected, useSelectedSessionInputs } from '../../acp/ses
 import { MAX_RESEARCH_INITIAL_INPUTS } from '../../types/sessionExperience';
 import { SessionInputControls } from './SessionInputControls';
 import type { ResearchLibraryFile } from '../../utils/researchLibrary';
+import { documentTitleFromContent, supportsDocumentTitle } from '../../utils/documentTitle';
 
 const i18n = defineMessages({
   outputs: { id: 'artifactPane.outputs', defaultMessage: 'Outputs' },
@@ -347,6 +348,7 @@ export function ArtifactPane() {
   const [researchLibraryLoading, setResearchLibraryLoading] = useState(false);
   const [researchLibraryError, setResearchLibraryError] = useState(false);
   const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [documentTitles, setDocumentTitles] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [outputFileExtensions, setOutputFileExtensions] = useState<string[]>(
     defaultSettings.outputFileExtensions
@@ -447,6 +449,47 @@ export function ArtifactPane() {
     [artifacts, outputFileExtensions]
   );
 
+  const titleRequests = useMemo(() => {
+    const requests = new Map<string, { filePath: string; baseDirectory?: string }>();
+    for (const artifact of displayedArtifacts) {
+      if (supportsDocumentTitle(artifact.displayPath)) {
+        requests.set(artifact.displayPath, {
+          filePath: artifact.displayPath,
+          baseDirectory: artifact.baseWorkingDir,
+        });
+      }
+    }
+    for (const file of researchLibraryFiles) {
+      if (supportsDocumentTitle(file.path)) {
+        requests.set(file.path, { filePath: file.path });
+      }
+    }
+    return Array.from(requests.values());
+  }, [displayedArtifacts, researchLibraryFiles]);
+
+  useEffect(() => {
+    const pending = titleRequests.filter((request) => !(request.filePath in documentTitles));
+    if (pending.length === 0) return;
+    let cancelled = false;
+    void window.electron
+      .readArtifactTitles(pending)
+      .then((titles) => {
+        if (cancelled) return;
+        // Record every requested path so a file without a title is asked for once.
+        setDocumentTitles((previous) => {
+          const next = { ...previous };
+          for (const request of pending) {
+            next[request.filePath] = titles[request.filePath] ?? '';
+          }
+          return next;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [titleRequests, documentTitles]);
+
   useEffect(() => {
     if (!activeTab) {
       setPreview(null);
@@ -531,6 +574,14 @@ export function ArtifactPane() {
   };
 
   const filePath = activeTab?.source.type === 'file' ? activeTab.source.path : null;
+  const previewTitle = useMemo(() => {
+    if (!activeTab) return null;
+    if (filePath && documentTitles[filePath]) return documentTitles[filePath];
+    if (preview?.encoding === 'utf8' && !preview.error && supportsDocumentTitle(activeTab.title)) {
+      return documentTitleFromContent(preview.content);
+    }
+    return null;
+  }, [activeTab, documentTitles, filePath, preview]);
   const fileBaseDirectory =
     activeTab?.source.type === 'file' ? activeTab.source.baseDirectory : undefined;
 
@@ -794,7 +845,7 @@ export function ArtifactPane() {
                       <FileText className="h-4 w-4 shrink-0 text-text-secondary" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-xs text-text-primary">
-                          {file.name}
+                          {documentTitles[file.path] || file.name}
                         </span>
                         <span className="block truncate text-[10px] text-text-secondary">
                           {file.relativePath} · {formatInputSize(file.sizeBytes)}
@@ -831,10 +882,12 @@ export function ArtifactPane() {
                     <File className="h-4 w-4 shrink-0 text-text-secondary" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-xs text-text-primary">
-                        {artifact.displayPath}
+                        {documentTitles[artifact.displayPath] || artifact.displayPath}
                       </span>
                       <span className="block truncate text-[10px] text-text-secondary">
-                        {artifact.relation} · {artifact.provenance.replace(/_/g, ' ')}
+                        {documentTitles[artifact.displayPath]
+                          ? `${artifact.displayPath} · ${artifact.relation}`
+                          : `${artifact.relation} · ${artifact.provenance.replace(/_/g, ' ')}`}
                       </span>
                     </span>
                     {status && <span className="text-[10px] text-text-secondary">{status}</span>}
@@ -868,6 +921,20 @@ export function ArtifactPane() {
                   />
                 </button>
               ))}
+            </div>
+          )}
+
+          {activeTab && (
+            <div className="shrink-0 border-b border-border-primary px-3 py-2">
+              <div className="truncate text-sm font-medium text-text-primary" title={previewTitle ?? activeTab.title}>
+                {previewTitle ?? activeTab.title}
+              </div>
+              <div
+                className="truncate font-mono text-[10px] text-text-secondary"
+                title={filePath ?? activeTab.title}
+              >
+                {filePath ?? activeTab.title}
+              </div>
             </div>
           )}
 
@@ -912,9 +979,7 @@ export function ArtifactPane() {
 
           {activeTab && (
             <div className="flex shrink-0 items-center gap-1 border-t border-border-primary px-2 py-1.5">
-              <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-text-secondary">
-                {filePath ?? activeTab.title}
-              </span>
+              <span className="min-w-0 flex-1" />
               <Button
                 variant="ghost"
                 size="xs"
