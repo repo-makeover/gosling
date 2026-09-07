@@ -3990,7 +3990,7 @@ dependencies = [
 
 [[package]]
 name = "gosling"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-http",
@@ -4108,7 +4108,7 @@ dependencies = [
 
 [[package]]
 name = "gosling-acp-macros"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -4116,7 +4116,7 @@ dependencies = [
 
 [[package]]
 name = "gosling-cli"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-http",
@@ -4180,7 +4180,7 @@ dependencies = [
 
 [[package]]
 name = "gosling-mcp"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4209,7 +4209,7 @@ dependencies = [
 
 [[package]]
 name = "gosling-providers"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4246,7 +4246,7 @@ dependencies = [
 
 [[package]]
 name = "gosling-sdk"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-schema",
@@ -4259,7 +4259,7 @@ dependencies = [
 
 [[package]]
 name = "gosling-sdk-types"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-schema",
@@ -4270,7 +4270,7 @@ dependencies = [
 
 [[package]]
 name = "gosling-server"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4309,7 +4309,7 @@ dependencies = [
 
 [[package]]
 name = "gosling-test"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "clap",
  "serde_json",
@@ -4317,7 +4317,7 @@ dependencies = [
 
 [[package]]
 name = "gosling-test-support"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "axum",
  "env-lock",

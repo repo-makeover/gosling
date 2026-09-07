@@ -102,7 +102,7 @@ The Rust core owns agent execution, provider contracts, permissions, session per
 
 The current validation reference is the [2026-08-15 live playtest](docs/cloud/2026-08-15-live-all-scenarios-playtest.md): 58 pass, 5 fail, 47 blocked across all 110 scenario cards. Blocked is dominated by Desktop cards, which had no GUI driver — that is missing coverage, not a pass. The [2026-08-15 audit](docs/cloud/2026-08-15-master-report.md) and its [repair campaign](docs/logs/session/2026-08-16-audit-repair-campaign.md) record what was found and what has been fixed since.
 
-The next release candidate is `v1.1.0`. The source manifests must be aligned to `1.1.0` and every gate in the [release checklist](RELEASE_CHECKLIST.md) must pass before publication. The preceding stable GitHub release uses the noncanonical tag `v1.0.1-optimization-and-workspaces`; that historical discrepancy remains documented in the [release process](RELEASE.md) and will not be repaired by moving an existing tag.
+Current release: `v1.2.1`. See the [v1.2.1 release notes](documentation/docs/release-notes/v1.2.1.md) for what changed since the preceding published release. The source-tree gates — workspace format, Clippy, the full Rust suite, and the Desktop typecheck and tests — passed on 2026-09-06. The maintainer-owned installed-Desktop, signing, and artifact gates in the [release checklist](RELEASE_CHECKLIST.md) are tracked there and are not claimed by this line. The preceding stable GitHub release uses the noncanonical tag `v1.0.1-optimization-and-workspaces`; that historical discrepancy remains documented in the [release process](RELEASE.md) and will not be repaired by moving an existing tag.
 
 ## Known limits
 
@@ -146,7 +146,7 @@ for configuration, trust, and removal guidance.
 ## Quick links
 
 - [Documentation index](documentation/INDEX.md) - user manuals, architecture, publishing, and stewardship
-- [v1.0.0 release notes](documentation/docs/release-notes/v1.0.0.md)
+- [v1.2.1 release notes](documentation/docs/release-notes/v1.2.1.md) and [v1.0.0 release notes](documentation/docs/release-notes/v1.0.0.md)
 - [Release process](RELEASE.md) and [release checklist](RELEASE_CHECKLIST.md)
 - [Known issues](documentation/docs/troubleshooting/known-issues.md)
 - [Current validation ledger](docs/polish/test-ledger.md)

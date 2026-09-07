@@ -1,7 +1,7 @@
 # gosling Release Checklist
 
 This is a maintainer-owned publish gate. Documentation preparation does not check
-any item automatically. The current candidate is `v1.1.0`; preserve published
+any item automatically. The current candidate is `v1.2.1`; preserve published
 historical tags rather than rewriting them.
 
 ## Version and source identity
@@ -14,11 +14,11 @@ historical tags rather than rewriting them.
 
 ## Source validation
 
-- [x] `cargo fmt --check` passes. (Observed 2026-08-27.)
-- [x] `cargo clippy --all-targets -- -D warnings` passes. (Observed 2026-08-27.)
-- [x] The complete Rust workspace test suite passes. (Observed 2026-08-27.)
-- [x] `cd ui/desktop && pnpm run typecheck` passes. (Observed 2026-08-27.)
-- [x] `cd ui/desktop && pnpm test` passes. (1,071 tests observed 2026-08-27.)
+- [x] `cargo fmt --check` passes. (Observed 2026-09-06 for `v1.2.1`.)
+- [x] `cargo clippy --all-targets -- -D warnings` passes. (Observed 2026-09-06 for `v1.2.1`.)
+- [x] The complete Rust workspace test suite passes. (Observed 2026-09-06 for `v1.2.1`.)
+- [x] `cd ui/desktop && pnpm run typecheck` passes. (Observed 2026-09-06 for `v1.2.1`.)
+- [x] `cd ui/desktop && pnpm test` passes. (150 test files observed 2026-09-06 for `v1.2.1`.)
 - [x] The documentation build, test, and typecheck commands pass from `documentation/`. (Observed 2026-08-27.)
 - [ ] Release workflow integrity, lockfile integrity, and archive/checksum verification pass.
 - [ ] The full scenario-card suite is replayed, or every non-replayed card is explicitly dispositioned with focused replacement evidence.
