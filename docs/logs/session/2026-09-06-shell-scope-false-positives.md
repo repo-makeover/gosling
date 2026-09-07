@@ -34,6 +34,17 @@ folders. Every one produced `/dev/null` (or `/dev/null;`) as the out-of-scope mu
 3. **Read-only list too narrow.** `printf`, `echo`, `ps`, `lsof`, `which`, `env`, `date`,
    `diff`, `du`, `df`, `jq`, hash tools, and similar commands were classified as mutating,
    so their explicit path arguments were checked as writes.
+4. **Quoted programs read as paths.** `awk '/index.sqlite$/ {print $NF}'` produced the
+   "path" `/index.sqlite$/ {print $NF}` because the single-quoted program starts with `/`,
+   and `awk` was not on the read-only list (session `20260906_50`, request
+   `call_dUixM0RR2bVOEqTFi0DTFiKR`).
+5. **Shell control keywords treated as executables.** After splitting, `do printf ...`
+   inside a `for` loop was judged by the executable `do`, so nothing on the read-only list
+   could match.
+
+The screenshot from 17:18 (`cd /Users/eric/Work/vscode/Muninn && printf ...; git status
+--short; ...` flagged as `/dev/null;`) is request `call_yyzXIttOjqoQToZ7vbzs2c5w`: causes 1
+and 2 together, with the trailing `;` glued onto the device path.
 
 ## Repair
 
@@ -47,7 +58,12 @@ folders. Every one produced `/dev/null` (or `/dev/null;`) as the out-of-scope mu
   descriptor duplication (`2>&1`), and treats a device-stream target as not a write. As a
   side effect `ls 2>/outside/err.log` is now correctly a write, which the old check missed.
 - The read-only command list gains the commands above; `sort` is read-only unless `-o` or
-  `--output` is present.
+  `--output` is present, and `awk` is read-only unless a token contains `>` or an in-place
+  flag.
+- `command_words` skips leading control keywords (`do`, `then`, `else`, `!`, `time`, ...) and
+  treats pure control-flow segments (`for x in ...`, `done`, `fi`) as read-only.
+- `embedded_redirect_target` still catches a write hidden inside a program argument, such as
+  `awk '{print > "/outside/pids.txt"}'`, which the old token check also missed.
 
 Guards added: `device_streams_are_recognized_narrowly`,
 `redirections_to_device_streams_do_not_count_as_writes`,
@@ -56,11 +72,18 @@ Guards added: `device_streams_are_recognized_narrowly`,
 versions of the three real commands against a workspace session and asserts that only the
 genuine out-of-scope append is flagged.
 
+## Replay of every prompt from today
+
+All eight `working_dir_scope` ALERT request ids in today's server logs were pulled from
+`sessions.db` and run through the patched `mutation_paths` with the session's two folders.
+None produces an out-of-scope path; the only remaining mutation candidates are the `cd`
+target under `/Users/eric` and the in-scope `sample -file` output.
+
 ## Validation
 
 | Check | Result |
 | --- | --- |
-| `cargo test -p gosling --lib -- working_dir_scope_inspector` | 29 passed; 0 failed |
+| `cargo test -p gosling --lib -- working_dir_scope_inspector` | 29 passed; 0 failed (includes the eight-command replay fixture in anonymized form) |
 | `cargo test -p gosling --lib` (with the host `MUNINN_MCP_BEARER_TOKEN` unset) | 1852 passed; 0 failed; 3 ignored |
 | `cargo clippy -p gosling --all-targets -- -D warnings` | Passed |
 | `cargo fmt --all -- --check`, `git diff --check` | Passed |
@@ -70,9 +93,13 @@ whenever the host shell exports `MUNINN_MCP_BEARER_TOKEN`; it is not touched her
 
 ## Deployment note
 
-The running `/Applications/Gosling.app` still carries the old inspector. The fix takes effect
-after rebuilding the server binary and relaunching the app (see the server-only shortcut in
-the rebuild notes); a live turn was in progress, so the binary was not swapped in this session.
+Installed with the server-only shortcut: `cargo build --release -p gosling-cli --bin gosling`
+(via `scripts/with-rusty-v8-cache.sh`), previous binary preserved as
+`install-backups/gosling.pre-scope-fix-20260906-1733`, new binary
+`eb2d839a0fbaacf50134c3fd76ea34ae9e1e3b7efadce3a3e66a1bae06a6b92d` copied to
+`/Applications/Gosling.app/Contents/Resources/bin/gosling` while the app was not running, then
+the app was relaunched. No configuration change is required; the inspector's folder policy
+and `permission.yaml` are untouched. Rollback is one `cp` from the backup.
 
 ## Not changed
 

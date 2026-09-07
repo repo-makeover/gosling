@@ -464,12 +464,40 @@ fn shell_segments(command: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// The words of a simple command once leading shell control keywords such
+/// as `do`, `then`, or `!` are removed; empty when the segment is only
+/// control flow (`done`, `fi`, `for x in ...`).
+fn command_words(segment: &[String]) -> &[String] {
+    let mut words = segment;
+    while let Some((first, rest)) = words.split_first() {
+        match first.as_str() {
+            "do" | "then" | "else" | "elif" | "if" | "while" | "until" | "!" | "time" | "{"
+            | "(" => words = rest,
+            "for" | "case" | "select" | "done" | "fi" | "esac" | "}" | ")" => return &[],
+            _ => return words,
+        }
+    }
+    words
+}
+
 fn collect_shell_segment_paths(segment: &[String], working_dir: &Path, paths: &mut Vec<PathBuf>) {
-    for token in segment.iter().skip(1) {
+    for token in command_words(segment).iter().skip(1) {
         if let Some(path) = path_from_shell_token(token) {
+            paths.push(resolve(path, working_dir));
+        } else if let Some(path) = embedded_redirect_target(token) {
             paths.push(resolve(path, working_dir));
         }
     }
+}
+
+/// A redirection target quoted inside a program argument, such as
+/// `awk '{print > "/tmp/out"}'`, which word splitting hides in one token.
+fn embedded_redirect_target(token: &str) -> Option<&str> {
+    let (_, target) = token.rsplit_once('>')?;
+    let target = target
+        .trim()
+        .trim_matches(|character: char| matches!(character, '"' | '\'' | '}' | ')' | ';'));
+    (looks_like_explicit_path(target) && !is_device_stream(Path::new(target))).then_some(target)
 }
 
 fn referenced_paths(tool_call: &CallToolRequestParams, working_dir: &Path) -> Vec<PathBuf> {
@@ -628,7 +656,10 @@ fn shell_segment_is_read_only(segment: &[String]) -> bool {
     if (0..segment.len()).any(|index| redirects_output_to_file(segment, index)) {
         return false;
     }
-    let executable = Path::new(&segment[0])
+    let Some(executable) = command_words(segment).first() else {
+        return true;
+    };
+    let executable = Path::new(executable)
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
@@ -641,6 +672,9 @@ fn shell_segment_is_read_only(segment: &[String]) -> bool {
         "sort" => !segment
             .iter()
             .any(|token| token == "-o" || token.starts_with("-o") || token.starts_with("--output")),
+        "awk" | "gawk" | "mawk" | "nawk" => !segment
+            .iter()
+            .any(|token| token.contains('>') || token == "-i" || token.starts_with("--in-place")),
         "find" => !segment.iter().any(|token| {
             matches!(
                 token.as_str(),
@@ -1699,8 +1733,26 @@ mod tests {
                         ),
                     ),
                     shell_request(
+                        "store",
+                        &format!(
+                            "cd {} && printf '\\n---store---\\n' && rg -n 'retention' src/*.py | head -130 && lsof -n -c python3 2>/dev/null | awk '/index.sqlite$/ {{print $NF}}' | sort -u && sed -n '1,260p' src/retention.py",
+                            project.display()
+                        ),
+                    ),
+                    shell_request(
+                        "ports",
+                        "for port in 11434 11435; do printf '\\nPORT %s\\n' \"$port\"; curl -fsS --max-time 3 \"http://127.0.0.1:$port/api/ps\"; done; top -l 1 -n 5 -o cpu",
+                    ),
+                    shell_request(
                         "write-outside",
                         &format!("printf 'x' >> {}", library.join("draft.md").display()),
+                    ),
+                    shell_request(
+                        "awk-write-outside",
+                        &format!(
+                            "ps -o pid | awk '{{print > \"{}\"}}'",
+                            library.join("pids.txt").display()
+                        ),
                     ),
                 ],
                 &[],
@@ -1713,6 +1765,6 @@ mod tests {
             .iter()
             .map(|result| result.tool_request_id.as_str())
             .collect();
-        assert_eq!(flagged, vec!["write-outside"]);
+        assert_eq!(flagged, vec!["write-outside", "awk-write-outside"]);
     }
 }
