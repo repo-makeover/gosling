@@ -19,4 +19,5 @@ pub mod permission;
 pub mod request_log;
 pub mod retry;
 pub mod thinking;
+pub mod transport_policy;
 pub mod utils;

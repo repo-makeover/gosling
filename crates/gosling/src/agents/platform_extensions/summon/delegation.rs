@@ -2,8 +2,14 @@
 // Extracted from `summon.rs` in a behavior-preserving modularization.
 // The `summon` compatibility facade keeps delegation behind `SummonClient` and MCP dispatch.
 
-use super::delegate_config::{delegate_mode, delegate_mode_notice};
+use super::delegate_config::{delegate_mode, delegate_mode_notice, sync_delegate_timeout};
 use super::*;
+
+/// How long a timed-out synchronous delegate is given to unwind after its
+/// cancellation token fires, before the task is aborted outright. Matches the
+/// grace the `load(cancel: true)` path already uses so both cancellation routes
+/// behave the same.
+const SYNC_DELEGATE_CANCEL_GRACE: Duration = Duration::from_secs(5);
 
 impl SummonClient {
     pub(super) fn create_delegate_tool(&self) -> Tool {
@@ -160,26 +166,84 @@ impl SummonClient {
 
         let subagent_session_id = subagent_session.id.clone();
 
-        let result = run_subagent_task(SubagentRunParams {
-            config: agent_config,
-            task: SubagentTask {
-                instructions: spec.instructions.clone(),
-                prompt: spec.prompt.clone(),
+        // The delegate runs on its own task so a timeout can cancel it
+        // cooperatively and then reclaim the tool call. Awaiting the future
+        // inline and dropping it on timeout would tear the subagent down at an
+        // arbitrary await point, leaving its own tool operations `started`.
+        // The token is a child of the parent tool call's, so cancelling the
+        // parent still stops the delegate, while the timeout stops only this
+        // delegate.
+        let delegate_token = cancellation_token.child_token();
+        let run_token = delegate_token.clone();
+        let mut handle = tokio::spawn(async move {
+            run_subagent_task(SubagentRunParams {
+                config: agent_config,
+                task: SubagentTask {
+                    instructions: spec.instructions.clone(),
+                    prompt: spec.prompt.clone(),
+                },
+                task_config,
+                return_last_only: true,
+                session_id: subagent_session.id,
+                cancellation_token: Some(run_token),
+                on_message: None,
+                notification_tx: Some(notif_tx),
+            })
+            .await
+        });
+
+        // `Err(budget)` is the timeout, carrying the budget it exceeded.
+        let outcome = match sync_delegate_timeout() {
+            Some(budget) => tokio::select! {
+                joined = &mut handle => Ok(joined),
+                _ = tokio::time::sleep(budget) => Err(budget),
             },
-            task_config,
-            return_last_only: true,
-            session_id: subagent_session.id,
-            cancellation_token: Some(cancellation_token),
-            on_message: None,
-            notification_tx: Some(notif_tx),
-        })
-        .await;
+            None => Ok((&mut handle).await),
+        };
 
         let mut meta = Meta::new();
         meta.0.insert(
             "subagent_session_id".to_string(),
-            serde_json::Value::String(subagent_session_id),
+            serde_json::Value::String(subagent_session_id.clone()),
         );
+
+        let joined = match outcome {
+            Ok(joined) => joined,
+            Err(budget) => {
+                delegate_token.cancel();
+                if tokio::time::timeout(SYNC_DELEGATE_CANCEL_GRACE, &mut handle)
+                    .await
+                    .is_err()
+                {
+                    handle.abort();
+                }
+                warn!(
+                    "Synchronous delegate {} exceeded its {}s budget and was cancelled",
+                    subagent_session_id,
+                    budget.as_secs()
+                );
+                meta.0.insert(
+                    "delegate_status".to_string(),
+                    serde_json::Value::String("timed_out".to_string()),
+                );
+                return Ok(CallToolResult::error(vec![Content::text(format!(
+                    "Delegation timed out after {}s and was cancelled. It was not retried \
+                     automatically -- re-running it would repeat any side effects the delegate \
+                     already performed. Whatever the delegate completed before cancellation is \
+                     durable in session {}; read that session to decide how to proceed. For \
+                     work that legitimately runs longer, launch it with async: true and poll \
+                     it with load(), or raise GOSLING_SYNC_DELEGATE_TIMEOUT_SECS.",
+                    budget.as_secs(),
+                    subagent_session_id
+                ))])
+                .with_meta(Some(meta)));
+            }
+        };
+
+        let result = match joined {
+            Ok(result) => result,
+            Err(join_error) => Err(anyhow::anyhow!("delegate task panicked: {join_error}")),
+        };
 
         match result {
             Ok(text) => Ok(CallToolResult::success(vec![Content::text(format!(

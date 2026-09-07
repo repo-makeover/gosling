@@ -998,11 +998,27 @@ async fn test_context_limit_recovery_compaction() -> Result<()> {
     Ok(())
 }
 
+/// Pins the auto-compaction threshold for a test that asserts against the
+/// built-in 0.8 default.
+///
+/// `check_if_compaction_needed` resolves `GOSLING_AUTO_COMPACT_THRESHOLD`
+/// through `Config::global()`, which reads the operator's real settings file.
+/// The fixtures below sit between the 0.8 default boundary (102,400 of 128,000)
+/// and a raised one, so on a machine configured with, say, 0.95 they reported
+/// that compaction never fired -- a test-isolation defect, not a compaction
+/// regression (REL-CI-002). Scoping the variable to these tests rather than the
+/// whole run keeps it out of `acp_custom_requests_test`, which runs in a
+/// separate binary and asserts an exact preference list.
+fn pin_auto_compact_threshold() -> impl Drop {
+    env_lock::lock_env([("GOSLING_AUTO_COMPACT_THRESHOLD", Some("0.8"))])
+}
+
 /// Case 1: check_if_compaction_needed fires in reply() before the first LLM call.
 /// The session token count is already above the threshold when reply() is called.
 #[tokio::test]
 #[serial]
 async fn test_compaction_fires_before_first_llm_call() -> Result<()> {
+    let _threshold = pin_auto_compact_threshold();
     let temp_dir = TempDir::new()?;
     let agent = Agent::new();
 
@@ -1081,6 +1097,7 @@ async fn test_compaction_fires_before_first_llm_call() -> Result<()> {
 #[tokio::test]
 #[serial]
 async fn test_compaction_fires_inside_reply_loop() -> Result<()> {
+    let _threshold = pin_auto_compact_threshold();
     let temp_dir = TempDir::new()?;
     let agent = Agent::new();
 

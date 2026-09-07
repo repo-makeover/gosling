@@ -164,6 +164,7 @@ These variables control how gosling manages conversation sessions and context.
 | `GOSLING_MAX_TURNS` | [Maximum number of turns](/docs/guides/sessions/smart-context-management#maximum-turns) allowed without user input | Integer (e.g., 10, 50, 100) | 1000 |
 | `GOSLING_SUBAGENT_MAX_TURNS` | Sets the maximum turns allowed for a [subagent](/docs/guides/context-engineering/subagents) to complete before timeout. Can be overridden by `max_turns` in subagent tool calls. | Integer (e.g., 25) | 25 |
 | `GOSLING_MAX_BACKGROUND_TASKS` | Sets the maximum number of concurrent background [subagent](/docs/guides/context-engineering/subagents) tasks gosling can run at once | Integer (e.g., 1, 5, 10) | 5 |
+| `GOSLING_SYNC_DELEGATE_TIMEOUT_SECS` | Wall-clock budget for a synchronous `delegate` call. On expiry the subagent is cancelled and the tool call returns an error naming its session; the task is never retried automatically. Set `0` to remove the bound. Background delegates (`async: true`) are unaffected. | Integer seconds, or 0 to disable | 1800 |
 | `CONTEXT_FILE_NAMES` | Specifies custom filenames for [hint/context files](/docs/guides/context-engineering/using-goslinghints#custom-context-files) | JSON array of strings (e.g., `["CLAUDE.md", ".goslinghints"]`) | `[".goslinghints"]` |
 | `GOSLING_DISABLE_SESSION_NAMING` | Disables automatic AI-generated session naming; avoids the background model call and keeps the default "CLI Session" (gosling CLI) or "New Chat" (gosling Desktop) | "1", "true" (case-insensitive) to enable | false |
 | `GOSLING_DISABLE_TOOL_CALL_SUMMARY` | Disables the per-tool-call AI-generated summary title, keeping the fallback title instead. Saves one provider call per tool invocation. | "1", "true" (case-insensitive) to enable | false |
@@ -412,6 +413,26 @@ Optional [macOS sandbox](/docs/guides/sandbox) for gosling Desktop that restrict
 ## Network Configuration
 
 These variables configure network proxy settings for gosling.
+
+### Provider Transport Security
+
+Provider credentials travel as request headers, so gosling requires an encrypted transport to carry them. A provider base URL must use `https`, except on a loopback host (`localhost`, `127.0.0.1`, `::1`), where the request never leaves the machine — this is what keeps local inference servers such as Ollama and LM Studio working out of the box.
+
+A self-hosted model server on a trusted LAN is a legitimate deployment, so plaintext to a non-loopback host is reachable with an explicit opt-out. gosling logs a security event whenever the opt-out is used.
+
+| Variable | Purpose | Values | Default |
+|----------|---------|---------|---------|
+| `GOSLING_ALLOW_INSECURE_PROVIDER_TRANSPORT` | Allows a provider base URL to use plaintext HTTP to a non-loopback host. Credentials are sent unencrypted. | "1", "true", "yes" (case-insensitive) | false |
+
+Redirects are constrained regardless of this setting: gosling will not follow a provider redirect that downgrades `https` to `http`, that moves to a different host or port, or that exceeds four hops. `reqwest` drops `Authorization` across an origin change but not vendor API-key headers such as `x-api-key`, so an unconstrained redirect could carry a key to a host the configured base URL never named.
+
+**Examples**
+
+```bash
+# A self-hosted model server on the LAN, reached over plaintext HTTP
+export GOSLING_ALLOW_INSECURE_PROVIDER_TRANSPORT=true
+export OLLAMA_HOST=http://inference.lan:11434
+```
 
 ### OAuth Callback Port
 

@@ -1,3 +1,4 @@
+use crate::transport_policy::TransportPolicy;
 use anyhow::Result;
 use async_trait::async_trait;
 use reqwest::{
@@ -38,6 +39,7 @@ pub fn inference_client_builder(read_timeout: Duration) -> reqwest::ClientBuilde
     Client::builder()
         .read_timeout(read_timeout)
         .connect_timeout(Duration::from_secs(PROVIDER_CONNECT_TIMEOUT_SECS))
+        .redirect(TransportPolicy::from_env().redirect_policy())
 }
 
 /// The default stall budget for provider inference calls.
@@ -288,6 +290,8 @@ impl ApiClient {
         read_timeout: Duration,
         tls_config: Option<TlsConfig>,
     ) -> Result<Self> {
+        TransportPolicy::from_env().validate_base_url(&host)?;
+
         let mut client_builder = inference_client_builder(read_timeout);
 
         if let Some(ref config) = tls_config {

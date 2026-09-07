@@ -588,10 +588,11 @@ impl SessionManager {
     pub(crate) async fn acquire_session_turn_lease(
         &self,
         session_id: &str,
+        parent_cancel: Option<&tokio_util::sync::CancellationToken>,
     ) -> Result<session_leases::SessionTurnLease> {
         self.storage
             .clone()
-            .acquire_session_turn_lease(session_id)
+            .acquire_session_turn_lease(session_id, parent_cancel)
             .await
     }
 
@@ -1877,6 +1878,16 @@ mod tests {
             other => panic!("new operation should execute, got {other:?}"),
         };
 
+        // A tool call only ever runs inside a turn, and a turn always holds the
+        // session's turn lease. Hold one here so the fixture matches what a
+        // genuinely in-flight operation looks like on disk: since REL-GSL-006 a
+        // live PID alone is not enough to protect a `started` row, because a
+        // process can outlive the turn that dispatched the tool.
+        let owner_lease = sm
+            .acquire_session_turn_lease(&session.id, None)
+            .await
+            .unwrap();
+
         let peer = SessionManager::new(temp_dir.path().to_path_buf());
         assert_eq!(
             peer.recover_tool_operations(&session.id).await.unwrap(),
@@ -1896,6 +1907,7 @@ mod tests {
         );
 
         // The real owner can still complete the call normally afterward.
+        owner_lease.release().await.unwrap();
         let terminal_result = Ok(rmcp::model::CallToolResult::success(vec![
             rmcp::model::Content::text("sent"),
         ]));
@@ -5079,11 +5091,11 @@ mod tests {
         let second_manager = SessionManager::new(temp_dir.path().to_path_buf());
 
         let first_lease = first_manager
-            .acquire_session_turn_lease(&session.id)
+            .acquire_session_turn_lease(&session.id, None)
             .await
             .unwrap();
         let error = second_manager
-            .acquire_session_turn_lease(&session.id)
+            .acquire_session_turn_lease(&session.id, None)
             .await
             .err()
             .unwrap();
@@ -5091,10 +5103,270 @@ mod tests {
 
         first_lease.release().await.unwrap();
         second_manager
-            .acquire_session_turn_lease(&session.id)
+            .acquire_session_turn_lease(&session.id, None)
             .await
             .unwrap()
             .release()
+            .await
+            .unwrap();
+    }
+
+    /// REL-GSL-006: a `started` row whose owner process is alive but whose
+    /// session has no running turn is safe to surface as `in_doubt`. Before
+    /// this rule such a row stayed `started` until the owning process exited,
+    /// which is what stranded three tool operations for hours on 2026-09-05.
+    #[tokio::test]
+    async fn a_started_tool_operation_without_a_live_turn_recovers_as_in_doubt() {
+        let temp_dir = TempDir::new().unwrap();
+        let sm = SessionManager::new(temp_dir.path().to_path_buf());
+        let session = sm
+            .create_session(
+                PathBuf::from("/tmp/test"),
+                "Orphaned tool".to_string(),
+                SessionType::User,
+                GoslingMode::default(),
+            )
+            .await
+            .unwrap();
+        let tool_call = rmcp::model::CallToolRequestParams::new("send_email")
+            .with_arguments(rmcp::object!({ "recipient": "person@example.com" }));
+        sm.add_message(
+            &session.id,
+            &Message::assistant()
+                .with_generated_id()
+                .with_tool_request("tool-request-orphan", Ok(tool_call.clone())),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            sm.begin_tool_operation(&session.id, "tool-request-orphan", &tool_call, true)
+                .await
+                .unwrap(),
+            ToolOperationStart::Execute { .. }
+        ));
+
+        // The owner PID stays this very-much-alive test process; only the turn
+        // is gone. A peer must still finalize the row.
+        let peer = SessionManager::new(temp_dir.path().to_path_buf());
+        assert_eq!(peer.recover_tool_operations(&session.id).await.unwrap(), 1);
+
+        let reloaded = peer.get_session(&session.id, true).await.unwrap();
+        let conversation = reloaded.conversation.unwrap();
+        let responses = conversation
+            .messages()
+            .iter()
+            .flat_map(|message| message.content.iter())
+            .filter_map(MessageContent::as_tool_response)
+            .collect::<Vec<_>>();
+        assert_eq!(responses.len(), 1);
+        let error = responses[0]
+            .tool_result
+            .as_ref()
+            .expect_err("an orphaned operation recovers as an error");
+        assert!(error.message.contains("must not be retried automatically"));
+    }
+
+    /// REL-GSL-006: the lease has to belong to the operation's own owner. A
+    /// lease held by someone else means this operation's turn is over, so its
+    /// `started` row is stale even though its process is still running.
+    #[tokio::test]
+    async fn a_started_operation_is_recovered_when_another_owner_holds_the_turn() {
+        let temp_dir = TempDir::new().unwrap();
+        let dispatcher = SessionManager::new(temp_dir.path().to_path_buf());
+        let session = dispatcher
+            .create_session(
+                PathBuf::from("/tmp/test"),
+                "Handed-over session".to_string(),
+                SessionType::User,
+                GoslingMode::default(),
+            )
+            .await
+            .unwrap();
+        let tool_call = rmcp::model::CallToolRequestParams::new("send_email")
+            .with_arguments(rmcp::object!({ "recipient": "person@example.com" }));
+        dispatcher
+            .add_message(
+                &session.id,
+                &Message::assistant()
+                    .with_generated_id()
+                    .with_tool_request("tool-request-handover", Ok(tool_call.clone())),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            dispatcher
+                .begin_tool_operation(&session.id, "tool-request-handover", &tool_call, true)
+                .await
+                .unwrap(),
+            ToolOperationStart::Execute { .. }
+        ));
+
+        // A second manager now owns the session's turn. Both `owner_id`s are
+        // this live process, so only the lease ownership distinguishes them.
+        let successor = SessionManager::new(temp_dir.path().to_path_buf());
+        let successor_lease = successor
+            .acquire_session_turn_lease(&session.id, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            successor
+                .recover_tool_operations(&session.id)
+                .await
+                .unwrap(),
+            1,
+            "an operation whose owner no longer holds the turn is stale"
+        );
+        successor_lease.release().await.unwrap();
+    }
+
+    /// REL-GSL-005: a live owner that stops heartbeating loses the session.
+    /// Requiring the owner to be dead first would mean the only way to recover
+    /// a wedged turn is killing the app, which is what the 2026-09-05 write-gate
+    /// deadlock actually required.
+    #[tokio::test]
+    async fn session_turn_lease_expires_for_a_live_owner_that_stops_heartbeating() {
+        let temp_dir = TempDir::new().unwrap();
+        let owner = SessionManager::new(temp_dir.path().to_path_buf());
+        let session = owner
+            .create_session(
+                temp_dir.path().join("workspace"),
+                "Wedged turn".to_string(),
+                SessionType::User,
+                GoslingMode::default(),
+            )
+            .await
+            .unwrap();
+        let lease = owner
+            .acquire_session_turn_lease(&session.id, None)
+            .await
+            .unwrap();
+        // The stored PID is this test process, so the owner probes as alive;
+        // only the heartbeat has gone stale.
+        set_lease_age(&owner, &session.id, 200).await;
+
+        SessionManager::new(temp_dir.path().to_path_buf())
+            .acquire_session_turn_lease(&session.id, None)
+            .await
+            .expect("a live owner that stopped heartbeating can be taken over")
+            .release()
+            .await
+            .unwrap();
+
+        // Fencing: the evicted owner learns it lost the session on its next
+        // heartbeat and cancels its own turn, so the session never has two
+        // writers. This is what makes taking a live owner's lease safe.
+        assert!(!lease.heartbeat_once().await);
+        assert!(lease.turn_cancel_token().is_cancelled());
+        lease.abandon();
+    }
+
+    /// REL-GSL-005: a lease is still held while its owner keeps heartbeating,
+    /// however long the turn runs.
+    #[tokio::test]
+    async fn session_turn_lease_is_held_while_its_owner_keeps_heartbeating() {
+        let temp_dir = TempDir::new().unwrap();
+        let owner = SessionManager::new(temp_dir.path().to_path_buf());
+        let session = owner
+            .create_session(
+                temp_dir.path().join("workspace"),
+                "Long turn".to_string(),
+                SessionType::User,
+                GoslingMode::default(),
+            )
+            .await
+            .unwrap();
+        let lease = owner
+            .acquire_session_turn_lease(&session.id, None)
+            .await
+            .unwrap();
+        set_lease_age(&owner, &session.id, 80).await;
+        assert!(lease.heartbeat_once().await, "the renewal keeps the lease");
+
+        let error = SessionManager::new(temp_dir.path().to_path_buf())
+            .acquire_session_turn_lease(&session.id, None)
+            .await
+            .err()
+            .expect("a heartbeating owner keeps its lease");
+        assert!(error.to_string().contains("already has an active turn"));
+        assert!(!lease.turn_cancel_token().is_cancelled());
+        lease.abandon();
+    }
+
+    /// REL-GSL-005: a crashed owner's lease is free at once. Waiting out the
+    /// TTL after a crash would leave a relaunched app unable to touch its own
+    /// session for a minute and a half.
+    #[tokio::test]
+    async fn a_dead_owners_lease_is_free_even_with_a_fresh_heartbeat() {
+        let temp_dir = TempDir::new().unwrap();
+        let owner = SessionManager::new(temp_dir.path().to_path_buf());
+        let session = owner
+            .create_session(
+                temp_dir.path().join("workspace"),
+                "Crashed owner".to_string(),
+                SessionType::User,
+                GoslingMode::default(),
+            )
+            .await
+            .unwrap();
+        owner
+            .acquire_session_turn_lease(&session.id, None)
+            .await
+            .unwrap()
+            .abandon();
+        // The heartbeat is current; only the owning process is gone.
+        sqlx::query("UPDATE session_turn_leases SET owner_pid = ? WHERE session_id = ?")
+            .bind(i32::MAX as i64)
+            .bind(&session.id)
+            .execute(owner.storage().pool().await.unwrap())
+            .await
+            .unwrap();
+
+        SessionManager::new(temp_dir.path().to_path_buf())
+            .acquire_session_turn_lease(&session.id, None)
+            .await
+            .expect("a dead owner's lease is free immediately")
+            .release()
+            .await
+            .unwrap();
+    }
+
+    /// REL-GSL-005: cancelling the caller's token still cancels the turn, since
+    /// the lease's token is that token's child.
+    #[tokio::test]
+    async fn a_lease_turn_token_follows_the_callers_cancellation() {
+        let temp_dir = TempDir::new().unwrap();
+        let owner = SessionManager::new(temp_dir.path().to_path_buf());
+        let session = owner
+            .create_session(
+                temp_dir.path().join("workspace"),
+                "Cancelled turn".to_string(),
+                SessionType::User,
+                GoslingMode::default(),
+            )
+            .await
+            .unwrap();
+        let caller = tokio_util::sync::CancellationToken::new();
+        let lease = owner
+            .acquire_session_turn_lease(&session.id, Some(&caller))
+            .await
+            .unwrap();
+        let turn = lease.turn_cancel_token();
+        assert!(!turn.is_cancelled());
+        caller.cancel();
+        assert!(turn.is_cancelled());
+        lease.abandon();
+    }
+
+    async fn set_lease_age(manager: &SessionManager, session_id: &str, age_secs: i64) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        sqlx::query("UPDATE session_turn_leases SET updated_at = ? WHERE session_id = ?")
+            .bind(now - age_secs)
+            .bind(session_id)
+            .execute(manager.storage().pool().await.unwrap())
             .await
             .unwrap();
     }
@@ -5113,7 +5385,7 @@ mod tests {
             .await
             .unwrap();
         first_manager
-            .acquire_session_turn_lease(&session.id)
+            .acquire_session_turn_lease(&session.id, None)
             .await
             .unwrap()
             .abandon();
@@ -5124,7 +5396,7 @@ mod tests {
             .unwrap();
 
         SessionManager::new(temp_dir.path().to_path_buf())
-            .acquire_session_turn_lease(&session.id)
+            .acquire_session_turn_lease(&session.id, None)
             .await
             .unwrap()
             .release()

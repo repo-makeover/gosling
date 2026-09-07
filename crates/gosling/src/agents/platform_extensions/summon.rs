@@ -41,7 +41,9 @@ mod source_discovery;
 mod task_tracking;
 
 #[cfg(test)]
-use delegate_config::{delegate_mode, delegate_mode_notice, resolve_working_dir};
+use delegate_config::{
+    delegate_mode, delegate_mode_notice, resolve_working_dir, sync_delegate_timeout_from,
+};
 pub use source_discovery::discover_filesystem_sources;
 use source_discovery::{
     build_instructions_with_context, build_subagent_instructions, delegate_authority_summary,
@@ -332,6 +334,45 @@ You review code."#;
             .build_spec_from_agent(&source, &DelegateParams::default())
             .unwrap();
         assert_eq!(spec.role_extensions, Some(vec!["developer".to_string()]));
+    }
+
+    /// REL-GSL-004. Resolved against an isolated config rather than
+    /// `Config::global()`: the global singleton reads this machine's real
+    /// settings file, so asserting a default against it would fail on any
+    /// operator who has set the key (the REL-CI-002 defect class).
+    fn isolated_config() -> Config {
+        let config_file = tempfile::NamedTempFile::new().unwrap();
+        let secrets_file = tempfile::NamedTempFile::new().unwrap();
+        Config::new_with_file_secrets(config_file.path(), secrets_file.path()).unwrap()
+    }
+
+    #[test]
+    #[serial]
+    fn sync_delegate_timeout_defaults_to_thirty_minutes() {
+        let _guard = env_lock::lock_env([("GOSLING_SYNC_DELEGATE_TIMEOUT_SECS", None::<&str>)]);
+        assert_eq!(
+            sync_delegate_timeout_from(&isolated_config()),
+            Some(Duration::from_secs(1800))
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn sync_delegate_timeout_is_configurable_and_zero_opts_out() {
+        let config = isolated_config();
+        {
+            let _guard = env_lock::lock_env([("GOSLING_SYNC_DELEGATE_TIMEOUT_SECS", Some("45"))]);
+            assert_eq!(
+                sync_delegate_timeout_from(&config),
+                Some(Duration::from_secs(45))
+            );
+        }
+        let _guard = env_lock::lock_env([("GOSLING_SYNC_DELEGATE_TIMEOUT_SECS", Some("0"))]);
+        assert_eq!(
+            sync_delegate_timeout_from(&config),
+            None,
+            "0 means the operator opted out of the bound entirely"
+        );
     }
 
     #[test]

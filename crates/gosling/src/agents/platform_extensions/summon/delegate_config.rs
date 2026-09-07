@@ -4,6 +4,36 @@
 
 use super::*;
 
+/// How long a synchronous `delegate` may run before the parent turn reclaims
+/// its tool call (REL-GSL-004).
+///
+/// An async delegate is already bounded: `load` waits five minutes and then
+/// hands the model an explicit "still running, wait again or cancel" result. A
+/// synchronous delegate had no bound at all, so a delegate that never returned
+/// held its parent's tool call -- and therefore the parent's turn and session
+/// turn lease -- open indefinitely.
+///
+/// Thirty minutes is deliberately far above any delegate that is making
+/// progress and far below "forever". It bounds the failure, it does not pace
+/// the work: a delegate is already limited by `max_turns`, so the only tasks
+/// this ends are ones that are stuck rather than slow.
+const DEFAULT_SYNC_DELEGATE_TIMEOUT_SECS: u64 = 1800;
+
+/// The wall-clock budget for a synchronous delegate, or `None` when the
+/// operator has set the budget to `0` to opt out of the bound entirely.
+pub(super) fn sync_delegate_timeout() -> Option<Duration> {
+    sync_delegate_timeout_from(Config::global())
+}
+
+/// Split out from [`sync_delegate_timeout`] so tests can resolve the budget
+/// against an isolated config instead of the operator's real one.
+pub(super) fn sync_delegate_timeout_from(config: &Config) -> Option<Duration> {
+    let secs = config
+        .get_param::<u64>("GOSLING_SYNC_DELEGATE_TIMEOUT_SECS")
+        .unwrap_or(DEFAULT_SYNC_DELEGATE_TIMEOUT_SECS);
+    (secs > 0).then(|| Duration::from_secs(secs))
+}
+
 pub(super) fn delegate_mode(executes_tools_outside_gosling: bool) -> GoslingMode {
     if executes_tools_outside_gosling {
         GoslingMode::Chat

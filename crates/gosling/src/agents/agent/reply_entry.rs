@@ -153,8 +153,13 @@ impl Agent {
         }
 
         let turn_lease = session_manager
-            .acquire_session_turn_lease(&session_config.id)
+            .acquire_session_turn_lease(&session_config.id, cancel_token.as_ref())
             .await?;
+        // Everything below runs under the lease's token, not the caller's: it
+        // is a child of the caller's, so an explicit cancel still propagates,
+        // and it additionally fires if another process takes this session's
+        // turn lease over (REL-GSL-005).
+        let cancel_token = Some(turn_lease.turn_cancel_token());
 
         let message_text = user_message.as_concat_text();
 

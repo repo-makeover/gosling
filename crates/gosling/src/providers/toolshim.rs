@@ -40,6 +40,7 @@ use anyhow::Result;
 use gosling_providers::errors::ProviderError;
 use gosling_providers::formats::openai::create_request;
 use gosling_providers::images::ImageFormat;
+use gosling_providers::transport_policy::TransportPolicy;
 use reqwest::Client;
 use rmcp::model::{object, CallToolRequestParams, RawContent, Tool};
 use serde_json::{json, Value};
@@ -524,6 +525,7 @@ impl OllamaInterpreter {
     pub fn new() -> Result<Self, ProviderError> {
         let client = Client::builder()
             .timeout(Duration::from_secs(DEFAULT_PROVIDER_TIMEOUT_SECS))
+            .redirect(TransportPolicy::from_env().redirect_policy())
             .build()
             .expect("Failed to create HTTP client");
 
@@ -562,7 +564,11 @@ impl OllamaInterpreter {
             })?;
         }
 
-        Ok(base_url.to_string())
+        let base_url = base_url.to_string();
+        TransportPolicy::from_env()
+            .validate_base_url(&base_url)
+            .map_err(|error| ProviderError::RequestFailed(error.to_string()))?;
+        Ok(base_url)
     }
 
     fn tool_structured_output_format_schema() -> Value {

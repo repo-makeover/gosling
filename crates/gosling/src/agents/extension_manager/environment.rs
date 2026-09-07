@@ -448,8 +448,15 @@ secret_sources:
 
     /// Regression guard: with nothing declared, the original not-found error is
     /// preserved verbatim rather than replaced by a keychain message.
+    ///
+    /// `merge_environments` falls back to the process environment, so the key
+    /// has to be unset for the duration: an operator who exports
+    /// `MUNINN_MCP_BEARER_TOKEN` (running the Muninn MCP server does exactly
+    /// that) would otherwise have the lookup succeed and fail this test for a
+    /// reason unrelated to the code under test.
     #[tokio::test]
     async fn merge_environments_keeps_the_original_error_when_nothing_is_declared() {
+        let _guard = env_lock::lock_env([("MUNINN_MCP_BEARER_TOKEN", None::<&str>)]);
         let (_dir, config) = config_with("secret_sources: {}\n");
         let err = merge_environments(
             &Envs::new(HashMap::new()),

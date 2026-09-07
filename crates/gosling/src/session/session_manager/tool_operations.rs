@@ -341,6 +341,10 @@ impl SessionStorage {
             .lock()
             .expect("active tool operations mutex poisoned")
             .clone();
+        // REL-GSL-006: who, if anyone, is running a turn on this session right
+        // now. Read once, inside the same transaction as the operations, so
+        // every row in this pass is judged against one consistent answer.
+        let live_turn_owner = self.live_turn_owner(&mut tx, session_id).await?;
 
         for (operation_id, request_id, tool_name, owner_id, owner_pid, state, stored_result) in
             operations
@@ -361,10 +365,29 @@ impl SessionStorage {
                 // recency, which only moves on state transitions and would
                 // either stomp a slow live tool or delay a genuine crash's
                 // `in_doubt` signal.
-                if let Some(pid) = owner_pid {
-                    if crate::subprocess::process_is_alive(pid as u32).await {
-                        continue;
-                    }
+                //
+                // REL-GSL-006: a live owner process is not a running turn.
+                // Requiring only a live process left operations `started`
+                // indefinitely whenever the owner survived but its turn did
+                // not -- the 2026-09-05 write-gate deadlock stranded three
+                // that way for hours, and only an app restart cleared them.
+                // A tool call can only still be executing inside a turn, and a
+                // turn is exactly what the session turn lease names, so the
+                // second half of the test is that this operation's owner is
+                // the one currently holding that lease. If it is not, its turn
+                // is over and nothing is running that recovery could interrupt.
+                // Recovery surfaces the row as `in_doubt` and never as
+                // retryable, so an operation whose side effects did land is
+                // still never repeated automatically.
+                let owner_process_is_live = match owner_pid {
+                    Some(pid) => match u32::try_from(pid) {
+                        Ok(pid) => crate::subprocess::process_is_alive(pid).await,
+                        Err(_) => false,
+                    },
+                    None => false,
+                };
+                if owner_process_is_live && live_turn_owner.as_deref() == Some(owner_id.as_str()) {
+                    continue;
                 }
             }
 

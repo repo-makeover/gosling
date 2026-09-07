@@ -208,18 +208,49 @@ and [`docs/logs/session/2026-09-05-deep-research-stall-write-gate-deadlock.md`](
       before awaiting remote calls, so a stalled extension no longer holds the
       global extension-map mutex.
 
-The following findings remain open because their safe behavior needs an explicit
-owner decision rather than a guessed timeout or policy:
+The following findings were held open for an explicit owner decision rather than
+a guessed timeout or policy. All four were decided and implemented on
+2026-09-07; the reasoning behind each contract is recorded at its
+implementation site and in
+[the session log](logs/session/2026-09-07-reliability-decision-register.md).
 
-- [ ] **REL-GSL-004** — choose the synchronous-delegation timeout and its
-      cancellation/recovery contract.
-- [ ] **REL-GSL-005** — choose whether a live-owner session-turn lease can
-      expire, including how legitimate long turns prove liveness.
-- [ ] **REL-GSL-006** — choose when an unrecovered `started` tool operation may
-      become visible `in_doubt` without risking duplicate execution.
-- [ ] **ARC-GSL-006** — design the provider `TransportPolicy` (HTTPS-only,
-      loopback exception, and redirect constraints) before porting the remaining
-      Snowflake transport hardening.
+- [x] **REL-GSL-004** — a synchronous `delegate` runs under a 30-minute
+      wall-clock budget (`GOSLING_SYNC_DELEGATE_TIMEOUT_SECS`, `0` to disable).
+      On expiry the delegate's cancellation token fires, it is given the same
+      5-second unwind grace the `load(cancel: true)` path uses, and only then
+      aborted. The tool call returns an **error** naming the budget and the
+      subagent session that holds the partial work, and states that the task
+      was not retried — re-running it would repeat any side effects that
+      already landed. Background delegates keep their existing `load` contract.
+- [x] **REL-GSL-005** — yes, a live owner's lease can expire, and it expires on
+      heartbeat staleness alone at the existing 90-second TTL. Requiring the
+      owner process to be dead first would mean the only way to recover a
+      wedged turn is killing the app, which is what the 2026-09-05 deadlock
+      actually required. A long turn proves liveness solely through its
+      15-second heartbeat. What makes takeover safe is new **fencing**:
+      takeover deletes the lease row, the evicted owner's next heartbeat
+      updates zero rows, and it responds by cancelling its own turn, so a
+      session that changes hands never has two writers. A renewal that *fails*
+      is not revocation. A dead owner's lease is still free immediately, so
+      crash recovery is unchanged.
+- [x] **REL-GSL-006** — a `started` operation becomes visible `in_doubt` when
+      its owner is not the process currently holding the session's turn lease.
+      A live owner *process* is not a running turn; requiring only process
+      liveness is what left three operations `started` for hours on 2026-09-05
+      until an app restart. A tool call can only execute inside a turn, so an
+      owner that no longer holds the turn has nothing in flight to interrupt.
+      Recovery still surfaces the row as `in_doubt` and never as retryable, so
+      an operation whose side effects did land is never repeated automatically.
+- [x] **ARC-GSL-006** — `gosling_providers::transport_policy::TransportPolicy`
+      is enforced for every provider client built through `ApiClient` and for
+      the Ollama toolshim. A base URL must be `https`, or `http` on a loopback
+      host; plaintext to any other host requires
+      `GOSLING_ALLOW_INSECURE_PROVIDER_TRANSPORT` and logs a security event.
+      Redirects may not downgrade `https`, may not change host or port, and are
+      capped at four hops — `reqwest` drops `Authorization` across an origin
+      change but not vendor API-key headers. This closes the last unported item
+      from the [2026-09-04 upstream triage](logs/session/2026-09-04-upstream-goose-v149-triage.md);
+      Snowflake keeps its own stricter vendor check.
 
 ## Open items from the 2026-08-15 exhaustive audit — recorded 2026-08-16
 
@@ -495,7 +526,19 @@ performance audit. Confirmation evidence, validation, and residual trade-offs ar
       both directions. Found while preparing the v1.2.1 release; see
       [the release notes](../documentation/docs/release-notes/v1.2.1.md).
 
-- [ ] **REL-CI-002** — open, found 2026-09-06: `test_compaction_fires_before_first_llm_call`
+- [x] **REL-CI-002** — resolved 2026-09-07: both tests now pin the threshold
+      with `env_lock` for their own duration, so they assert against the 0.8
+      default they were written for instead of the operator's real config.
+      Scoping the variable to those two tests rather than the whole run is what
+      makes it safe: `acp_custom_requests_test` runs in a separate binary and
+      never sees it, so the collateral failure recorded below does not occur
+      (verified — 17 passed). A third test of the same class surfaced while
+      validating this and was fixed alongside it:
+      `merge_environments_keeps_the_original_error_when_nothing_is_declared`
+      read the operator's process environment, so exporting
+      `MUNINN_MCP_BEARER_TOKEN` (which running the Muninn MCP server does)
+      made its "no credential anywhere" assertion fail. Original report:
+      `test_compaction_fires_before_first_llm_call`
       and `test_compaction_fires_inside_reply_loop` in `crates/gosling/tests/compaction.rs`
       read the operator's real `Config::global()` for `GOSLING_AUTO_COMPACT_THRESHOLD`
       instead of the default they assert against. Both fixtures sit between the
