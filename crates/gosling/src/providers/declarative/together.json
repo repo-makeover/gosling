@@ -33,6 +33,14 @@
       "context_limit": 262144
     },
     {
+      "name": "zai-org/GLM-5.3-Flash",
+      "context_limit": 1048575
+    },
+    {
+      "name": "Qwen/Qwen3.7-Max",
+      "context_limit": 1000000
+    },
+    {
       "name": "openai/gpt-oss-120b",
       "context_limit": 131072
     }
