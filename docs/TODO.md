@@ -481,6 +481,35 @@ performance audit. Confirmation evidence, validation, and residual trade-offs ar
       Discovery register, benchmark limits, and follow-up review for both items
       are in [the session log](logs/session/2026-09-06-session-storage-optimization.md).
 
+#### v1.2.1 release preparation — 2026-09-06
+
+- [x] **REL-CI-001** — resolved 2026-09-06: `resolve_tool` again falls back to
+      owner-prefixed tool names (`code_execution__list_functions`) when the name
+      is not in the advertised list but the prefix names a live extension.
+      Commit `04114c2c7` removed that fallback without mentioning it in its
+      message, which broke `test_prompt_codemode` and left the repository's CI
+      test gate red on `main` from 2026-09-05 until this release. Platform
+      extensions advertise their tools unprefixed, so a model addressing one by
+      owner failed its turn. A prefix naming no extension still fails, and
+      `test_resolve_tool_accepts_owner_prefixed_name_for_unprefixed_tool` guards
+      both directions. Found while preparing the v1.2.1 release; see
+      [the release notes](../documentation/docs/release-notes/v1.2.1.md).
+
+- [ ] **REL-CI-002** — open, found 2026-09-06: `test_compaction_fires_before_first_llm_call`
+      and `test_compaction_fires_inside_reply_loop` in `crates/gosling/tests/compaction.rs`
+      read the operator's real `Config::global()` for `GOSLING_AUTO_COMPACT_THRESHOLD`
+      instead of the default they assert against. Both fixtures sit between the
+      0.8 default boundary (102,400 of 128,000) and a raised one, so on a machine
+      whose config sets 0.95 they report that compaction never fired. They pass
+      with `GOSLING_AUTO_COMPACT_THRESHOLD=0.8` and in CI, which has no operator
+      config, so this is a test-isolation defect, not a compaction regression.
+      Setting that variable is not a workaround: it then makes
+      `test_custom_preferences_read_save_remove` in `acp_custom_requests_test`
+      fail, because that test asserts an exact preference list and the variable
+      adds an `autoCompactThreshold` entry. Both tests read the real
+      `Config::global()`; isolate them the way `93a19738d` isolated the
+      summarizer-mode tests.
+
 ### Lower priority, mechanical but needs a judgement call
 
 ARCN-GSL-002 (49 scattered `process.env` reads), ARC-GSL-005 (duplicated

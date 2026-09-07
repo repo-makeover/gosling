@@ -58,6 +58,24 @@ impl ExtensionManager {
             });
         }
 
+        // Platform extensions advertise their tools unprefixed, but models
+        // routinely address them by owner, as `code_execution__list_functions`.
+        // Resolving that form against a live extension keeps those calls working
+        // instead of failing a turn on a naming convention.
+        if let Some((prefix, actual)) = tool_name.split_once("__") {
+            let owner = name_to_key(prefix);
+            if let Some(client) = self.get_server_client(&owner).await {
+                return Ok(ResolvedTool {
+                    tool_name: tool_name.to_string(),
+                    extension_name: owner,
+                    actual_tool_name: actual.to_string(),
+                    client,
+                    tool_meta: None,
+                    resource_uri: None,
+                });
+            }
+        }
+
         let available = tools
             .iter()
             .map(|t| t.name.as_ref())

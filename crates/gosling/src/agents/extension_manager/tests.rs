@@ -1108,6 +1108,32 @@ async fn test_resolve_tool_error_includes_available_tools() {
     );
 }
 
+#[tokio::test]
+async fn test_resolve_tool_accepts_owner_prefixed_name_for_unprefixed_tool() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let extension_manager = ExtensionManager::new_without_provider(temp_dir.path().to_path_buf());
+
+    extension_manager
+        .add_mock_extension("code_execution".to_string(), Arc::new(MockClient {}))
+        .await;
+
+    let resolved = extension_manager
+        .resolve_tool("test-session-id", "code_execution__list_functions")
+        .await
+        .expect("an owner-prefixed name should resolve against a live extension");
+
+    assert_eq!(resolved.extension_name, "code_execution");
+    assert_eq!(resolved.actual_tool_name, "list_functions");
+
+    let unknown_owner = extension_manager
+        .resolve_tool("test-session-id", "no_such_extension__list_functions")
+        .await;
+    assert!(
+        unknown_owner.is_err(),
+        "a prefix that names no extension must still fail"
+    );
+}
+
 #[test]
 fn test_remove_untrusted_mcp_app_meta_strips_spoofed_payload() {
     let mut result = CallToolResult::success(vec![]);
