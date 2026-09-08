@@ -17,6 +17,7 @@ const EMPTY_ARTIFACTS: SessionArtifactDto[] = [];
 interface SessionPreviewState {
   activeTabId: string | null;
   tabs: ArtifactTab[];
+  deletedArtifacts: Record<string, string>;
 }
 
 interface PersistedWorkbench {
@@ -40,6 +41,7 @@ interface ArtifactWorkbenchValue {
   activeTabId: string | null;
   artifacts: SessionArtifactDto[];
   closeTab: (id: string) => void;
+  forgetTrashedFiles: (paths: string[]) => void;
   isOpen: boolean;
   openArtifact: (artifact: SessionArtifactDto) => void;
   openContent: (input: OpenContentInput) => void;
@@ -62,7 +64,7 @@ function createId(): string {
 }
 
 function emptySessionState(): SessionPreviewState {
-  return { activeTabId: null, tabs: [] };
+  return { activeTabId: null, tabs: [], deletedArtifacts: {} };
 }
 
 function validSessionState(value: Partial<SessionPreviewState> | undefined): SessionPreviewState {
@@ -75,6 +77,11 @@ function validSessionState(value: Partial<SessionPreviewState> | undefined): Ses
       })
     : [];
   return {
+    deletedArtifacts: Object.fromEntries(
+      Object.entries(value?.deletedArtifacts ?? {}).filter(
+        ([, version]) => typeof version === 'string'
+      )
+    ),
     activeTabId: tabs.some((tab) => tab.id === value?.activeTabId)
       ? (value?.activeTabId ?? null)
       : (tabs[0]?.id ?? null),
@@ -122,7 +129,14 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
   const [isOpen, setIsOpen] = useState(initial.isOpen);
   const [width, setWidthState] = useState(initial.width);
   const current = sessions[visibleSessionId] ?? emptySessionState();
-  const artifacts = artifactsBySession[visibleSessionId] ?? EMPTY_ARTIFACTS;
+  const deletedArtifacts = sessions[visibleSessionId]?.deletedArtifacts;
+  const artifacts = useMemo(
+    () =>
+      (artifactsBySession[visibleSessionId] ?? EMPTY_ARTIFACTS).filter(
+        (artifact) => deletedArtifacts?.[artifact.resolvedPath] !== artifact.lastSeenAt
+      ),
+    [artifactsBySession, visibleSessionId, deletedArtifacts]
+  );
 
   useEffect(() => {
     const fallback = sessions[DEFAULT_SESSION_ID] ?? emptySessionState();
@@ -171,7 +185,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
           title: artifactTitleFromPath(path),
           workspaceId,
         };
-        return { activeTabId: tab.id, tabs: [...state.tabs, tab] };
+        return { ...state, activeTabId: tab.id, tabs: [...state.tabs, tab] };
       });
       setIsOpen(true);
     },
@@ -201,7 +215,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
           title: artifactTitleFromPath(artifact.displayPath),
           workspaceId: artifact.workspaceId ?? undefined,
         };
-        return { activeTabId: tab.id, tabs: [...state.tabs, tab] };
+        return { ...state, activeTabId: tab.id, tabs: [...state.tabs, tab] };
       });
       setIsOpen(true);
     },
@@ -223,7 +237,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
         title: input.title,
         workspaceId: input.workspaceId,
       };
-      updateCurrent((state) => ({ activeTabId: tab.id, tabs: [...state.tabs, tab] }));
+      updateCurrent((state) => ({ ...state, activeTabId: tab.id, tabs: [...state.tabs, tab] }));
       setIsOpen(true);
     },
     [updateCurrent]
@@ -235,6 +249,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
         const index = state.tabs.findIndex((tab) => tab.id === id);
         const tabs = state.tabs.filter((tab) => tab.id !== id);
         return {
+          ...state,
           tabs,
           activeTabId:
             state.activeTabId === id
@@ -244,6 +259,57 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
       });
     },
     [updateCurrent]
+  );
+
+  const forgetTrashedFiles = useCallback(
+    (paths: string[]) => {
+      const removedPaths = new Set(paths);
+      // Preserve discovery history; dismiss only the version actually selected for deletion.
+      // This callback captures that inventory even if a different chat is active when Trash finishes.
+      setSessions((all) =>
+        Object.fromEntries(
+          [...new Set([...Object.keys(all), ...Object.keys(artifactsBySession)])].map(
+            (sessionId) => {
+              const state = all[sessionId] ?? emptySessionState();
+              const removedArtifacts = (artifactsBySession[sessionId] ?? []).filter((artifact) =>
+                removedPaths.has(artifact.resolvedPath)
+              );
+              const tabs = state.tabs.filter(
+                (tab) =>
+                  tab.source.type !== 'file' ||
+                  (!removedPaths.has(tab.source.path) &&
+                    !removedArtifacts.some(
+                      (artifact) =>
+                        tab.source.type === 'file' &&
+                        tab.source.path === artifact.displayPath &&
+                        tab.source.baseDirectory === artifact.baseWorkingDir
+                    ))
+              );
+              return [
+                sessionId,
+                {
+                  ...state,
+                  tabs,
+                  activeTabId: tabs.some((tab) => tab.id === state.activeTabId)
+                    ? state.activeTabId
+                    : (tabs[0]?.id ?? null),
+                  deletedArtifacts: {
+                    ...state.deletedArtifacts,
+                    ...Object.fromEntries(
+                      removedArtifacts.map((artifact) => [
+                        artifact.resolvedPath,
+                        artifact.lastSeenAt,
+                      ])
+                    ),
+                  },
+                },
+              ];
+            }
+          )
+        )
+      );
+    },
+    [artifactsBySession]
   );
 
   const resolveFilePath = useCallback(
@@ -292,6 +358,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
       activeTabId: current.activeTabId,
       artifacts,
       closeTab,
+      forgetTrashedFiles,
       isOpen,
       openArtifact,
       openContent,
@@ -310,6 +377,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
       activeTab,
       artifacts,
       closeTab,
+      forgetTrashedFiles,
       current.activeTabId,
       current.tabs,
       isOpen,

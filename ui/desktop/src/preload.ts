@@ -14,6 +14,7 @@ import type {
   ArtifactSaveResponse,
 } from './types/artifactRouter';
 import type { ResearchLibraryListing } from './utils/researchLibrary';
+import type { ArtifactTrashResult } from './types/artifactTrash';
 
 // Mapping from settings keys to their old localStorage keys for lazy migration
 const localStorageKeyMap: Partial<Record<SettingKey, string>> = {
@@ -146,6 +147,7 @@ type ElectronAPI = {
   revealArtifactFile: (filePath: string, baseDirectory?: string) => Promise<void>;
   writeFile: (directory: string, content: string) => Promise<boolean>;
   deleteFile: (filePath: string) => Promise<boolean>;
+  trashArtifactFiles: (paths: string[]) => Promise<ArtifactTrashResult[]>;
   ensureDirectory: (dirPath: string) => Promise<boolean>;
   listFiles: (dirPath: string, extension?: string) => Promise<string[]>;
   getAllowedExtensions: () => Promise<string[]>;
@@ -249,6 +251,7 @@ const electronAPI: ElectronAPI = {
   writeFile: (filePath: string, content: string) =>
     ipcRenderer.invoke('write-file', filePath, content),
   deleteFile: (filePath: string) => ipcRenderer.invoke('delete-file', filePath),
+  trashArtifactFiles: (paths: string[]) => ipcRenderer.invoke('trash-artifact-files', paths),
   ensureDirectory: (dirPath: string) => ipcRenderer.invoke('ensure-directory', dirPath),
   listFiles: (dirPath: string, extension?: string) =>
     ipcRenderer.invoke('list-files', dirPath, extension),

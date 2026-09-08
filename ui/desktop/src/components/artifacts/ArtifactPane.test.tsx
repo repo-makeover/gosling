@@ -33,6 +33,7 @@ describe('ArtifactPane', () => {
   const saveArtifact = vi.fn();
   const readArtifactFile = vi.fn();
   const readArtifactTitles = vi.fn();
+  const trashArtifactFiles = vi.fn();
 
   function Harness() {
     const { openContent, openFile, setVisibleSession } = useArtifactWorkbench();
@@ -142,7 +143,12 @@ describe('ArtifactPane', () => {
     });
     readArtifactTitles.mockReset();
     readArtifactTitles.mockResolvedValue({});
-    Object.assign(window.electron, { readArtifactFile, readArtifactTitles });
+    trashArtifactFiles
+      .mockReset()
+      .mockImplementation(async (paths: string[]) =>
+        paths.map((path) => ({ path, status: 'trashed' }))
+      );
+    Object.assign(window.electron, { readArtifactFile, readArtifactTitles, trashArtifactFiles });
     vi.mocked(window.electron.getResearchLibraryPath).mockResolvedValue(
       '/Users/tester/Documents/Gosling Research Library'
     );
@@ -558,9 +564,7 @@ describe('ArtifactPane', () => {
     fireEvent.click(await screen.findByRole('tab', { name: 'Library 1' }));
 
     expect(await screen.findByText('Numerical source-consistency sweep')).toBeInTheDocument();
-    expect(
-      screen.getByText(/bounded\/NUMERICAL_VALIDATION.md · 4 KB/)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/bounded\/NUMERICAL_VALIDATION.md · 4 KB/)).toBeInTheDocument();
     expect(screen.queryByText('NUMERICAL_VALIDATION.md')).not.toBeInTheDocument();
   });
 
@@ -617,5 +621,81 @@ describe('ArtifactPane', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(
       'Showing the first 500 files. Open the Research Library folder'
     );
+  });
+
+  it('deletes an output from its row and closes its preview only after Trash succeeds', async () => {
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Load mixed outputs' }));
+    fireEvent.click(screen.getByTitle('/outputs/report.md'));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete report.md' }));
+    expect(screen.getByTitle('/outputs/report.md')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Outputs 1' })).toBeInTheDocument());
+    expect(trashArtifactFiles).toHaveBeenCalledWith(['/outputs/report.md']);
+    expect(screen.queryByTitle('/outputs/report.md')).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Close report.md')).not.toBeInTheDocument();
+    expect(screen.getByTitle('/outputs/brief.docx')).toBeInTheDocument();
+  });
+
+  it('keeps failed Library batch selections and errors through the post-delete refresh', async () => {
+    const files = ['one.md', 'two.md'].map((name) => ({
+      name,
+      path: `/library/${name}`,
+      relativePath: name,
+      sizeBytes: 12,
+      modifiedAt: '2026-09-08T12:00:00Z',
+    }));
+    vi.mocked(window.electron.listResearchLibraryFiles).mockResolvedValue({
+      files,
+      truncated: false,
+    });
+    trashArtifactFiles.mockResolvedValue([
+      { path: '/library/one.md', status: 'trashed' },
+      { path: '/library/two.md', status: 'failed', error: 'File is locked' },
+    ]);
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(await screen.findByRole('tab', { name: 'Library 2' }));
+    await screen.findByTitle('/library/one.md');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+    vi.mocked(window.electron.listResearchLibraryFiles).mockResolvedValue({
+      files: [files[1]],
+      truncated: false,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Library 1' })).toBeInTheDocument());
+    expect(screen.queryByTitle('/library/one.md')).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select two.md' })).toBeChecked();
+    expect(screen.getByRole('alert')).toHaveTextContent('File is locked');
+    expect(trashArtifactFiles).toHaveBeenCalledWith(['/library/one.md', '/library/two.md']);
+  });
+
+  it('clears output selection when the visible session changes', () => {
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Load mixed outputs' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Load MIME PDF' }));
+    expect(screen.queryByText('2 selected')).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select report.pdf' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Delete selected' })).toBeDisabled();
   });
 });

@@ -58,6 +58,10 @@ mismatched copies make the prompt `Failed`; cancellation remains `Cancelled`.
   status or auto-injecting the entire library into model context.
 - The library is not a content-addressed archive. Operators can edit, move, or delete its files, and
   the next bounded listing reflects that filesystem state.
+- Added 2026-09-08: Library rows expose Delete and checkboxes with Select all, Clear selection,
+  and Delete selected. One confirmation lists the selected paths, then authorized regular files
+  move to OS Trash. Successful files disappear on refresh and their open previews close;
+  failed files retain their selection and a per-file error. Separate Outputs copies are kept.
 - The agent instruction creates and reports the dual-destination artifacts; the ACP completion gate
   independently checks their provenance, placement, and identity. Gosling does not copy arbitrary
   session artifacts after the fact or rewrite files the user produced elsewhere.

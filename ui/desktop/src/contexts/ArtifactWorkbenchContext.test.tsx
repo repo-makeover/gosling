@@ -180,4 +180,107 @@ describe('ArtifactWorkbenchProvider', () => {
     expect(workbench.tabs.find((tab) => tab.id === 'stale-pdf-kind')?.kind).toBe('pdf');
     expect(workbench.activeTabId).toBe('supported');
   });
+
+  it('persists deleted output versions, closes previews, and shows later regenerated outputs', async () => {
+    const artifact = {
+      sessionId: 'session-a',
+      displayPath: 'report.md',
+      resolvedPath: '/workspace/report.md',
+      baseWorkingDir: '/workspace',
+      relation: 'created' as const,
+      provenance: 'built_in_tool' as const,
+      firstSeenAt: '2026-01-01T00:00:00Z',
+      lastSeenAt: '2026-01-01T00:00:00Z',
+    };
+    const firstMount = render(
+      <ArtifactWorkbenchProvider>
+        <Harness />
+      </ArtifactWorkbenchProvider>
+    );
+    act(() => workbench.setVisibleSession('session-a', [artifact]));
+    act(() => workbench.openArtifact(artifact));
+    act(() => workbench.forgetTrashedFiles([artifact.resolvedPath]));
+    expect(workbench.artifacts).toEqual([]);
+    expect(workbench.tabs).toEqual([]);
+    act(() => workbench.openFile('/workspace/other.md'));
+    act(() => workbench.closeTab(workbench.activeTabId!));
+    await waitFor(() =>
+      expect(
+        JSON.parse(localStorage.getItem('gosling-artifact-workbench-v1')!).sessions['session-a']
+          .deletedArtifacts
+      ).toEqual({
+        '/workspace/report.md': artifact.lastSeenAt,
+      })
+    );
+    firstMount.unmount();
+    render(
+      <ArtifactWorkbenchProvider>
+        <Harness />
+      </ArtifactWorkbenchProvider>
+    );
+    act(() => workbench.setVisibleSession('session-a', [artifact]));
+    expect(workbench.artifacts).toEqual([]);
+    const regenerated = { ...artifact, lastSeenAt: '2026-01-02T00:00:00Z' };
+    act(() => workbench.setVisibleSession('session-a', [regenerated]));
+    expect(workbench.artifacts).toEqual([regenerated]);
+  });
+
+  it('applies a pending deletion to its captured session and version after navigation', () => {
+    const artifact = {
+      sessionId: 'session-a',
+      displayPath: 'report.md',
+      resolvedPath: '/alpha/report.md',
+      baseWorkingDir: '/alpha',
+      relation: 'created' as const,
+      provenance: 'built_in_tool' as const,
+      firstSeenAt: '2026-01-01T00:00:00Z',
+      lastSeenAt: '2026-01-01T00:00:00Z',
+    };
+    render(
+      <ArtifactWorkbenchProvider>
+        <Harness />
+      </ArtifactWorkbenchProvider>
+    );
+    act(() => workbench.setVisibleSession('session-a', [artifact]));
+    act(() => workbench.openArtifact(artifact));
+    const finishDeletion = workbench.forgetTrashedFiles;
+    const other = {
+      ...artifact,
+      sessionId: 'session-b',
+      baseWorkingDir: '/beta',
+      resolvedPath: '/beta/report.md',
+    };
+    act(() => workbench.setVisibleSession('session-b', [other]));
+    act(() => workbench.openArtifact(other));
+    act(() => finishDeletion([artifact.resolvedPath]));
+    expect(workbench.artifacts).toEqual([other]);
+    expect(workbench.tabs).toHaveLength(1);
+    act(() => workbench.setVisibleSession('session-a', [artifact]));
+    expect(workbench.artifacts).toEqual([]);
+    expect(workbench.tabs).toEqual([]);
+  });
+
+  it('does not dismiss a new artifact version published while Trash was pending', () => {
+    const artifact = {
+      sessionId: 'session-a',
+      displayPath: 'report.md',
+      resolvedPath: '/workspace/report.md',
+      baseWorkingDir: '/workspace',
+      relation: 'created' as const,
+      provenance: 'built_in_tool' as const,
+      firstSeenAt: '2026-01-01T00:00:00Z',
+      lastSeenAt: '2026-01-01T00:00:00Z',
+    };
+    render(
+      <ArtifactWorkbenchProvider>
+        <Harness />
+      </ArtifactWorkbenchProvider>
+    );
+    act(() => workbench.setVisibleSession('session-a', [artifact]));
+    const finishDeletion = workbench.forgetTrashedFiles;
+    const regenerated = { ...artifact, lastSeenAt: '2026-01-02T00:00:00Z' };
+    act(() => workbench.setVisibleSession('session-a', [regenerated]));
+    act(() => finishDeletion([artifact.resolvedPath]));
+    expect(workbench.artifacts).toEqual([regenerated]);
+  });
 });

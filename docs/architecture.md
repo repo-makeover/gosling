@@ -134,6 +134,12 @@ session deliverable capabilities defined by ADR-0006/0013 authorize reads, revea
 opening. Session capabilities are taken from the current window's validated routing configuration;
 they are not retained as directory grants or as permanent picker grants.
 
+Outputs and Research Library lists also expose explicit single-file and batch Trash actions.
+The file IPC handler checks each path with the artifact guard, rejects directories and symbolic
+links, and returns per-file outcomes without falling back to permanent unlink. Desktop closes
+successful previews and persists deleted Outputs versions as session presentation state; backend
+artifact provenance is retained. The Research Library list refreshes from its bounded disk scan.
+
 ## Error taxonomy
 
 | Class       | Examples                                                         | ACP behavior                                             | UI behavior                               |

@@ -20,6 +20,48 @@
   "appLayout.toggleOutputs": {
     "defaultMessage": "Toggle outputs pane"
   },
+  "artifactFiles.cancel": {
+    "defaultMessage": "Cancel"
+  },
+  "artifactFiles.clear": {
+    "defaultMessage": "Clear selection"
+  },
+  "artifactFiles.confirm": {
+    "defaultMessage": "Move to Trash"
+  },
+  "artifactFiles.delete": {
+    "defaultMessage": "Delete {name}"
+  },
+  "artifactFiles.deleteSelected": {
+    "defaultMessage": "Delete selected"
+  },
+  "artifactFiles.deleting": {
+    "defaultMessage": "Moving to Trash…"
+  },
+  "artifactFiles.description": {
+    "defaultMessage": "These files will be removed from their current locations. You can restore them from Trash. Other copies are kept."
+  },
+  "artifactFiles.failed": {
+    "defaultMessage": "{count,plural,one{Unable to delete # file. See the errors beside each item.} other{Unable to delete # files. See the errors beside each item.}}"
+  },
+  "artifactFiles.missing": {
+    "defaultMessage": "{count,plural,one{# file was already missing; removed from this list.} other{# files were already missing; removed from this list.}}"
+  },
+  "artifactFiles.select": {
+    "defaultMessage": "Select {name}"
+  },
+  "artifactFiles.selectAll": {
+    "defaultMessage": "Select all"
+  },
+  "artifactFiles.selected": {
+    "defaultMessage": "{count} selected"
+  },
+  "artifactFiles.title": {
+    "defaultMessage": "{count,plural,one{Move # file to Trash?} other{Move # files to Trash?}}"
+  },
+  "artifactFiles.trashed": {
+    "defaultMessage": "{count,plural,one{# file moved to Trash.} other{# files moved to Trash.}}"
+  },
   "artifactMessageLinks.openDeliverable": {
     "defaultMessage": "Open {name} in Outputs"
   },

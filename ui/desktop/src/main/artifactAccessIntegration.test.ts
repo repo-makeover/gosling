@@ -18,12 +18,15 @@ import { expandTilde } from '../utils/pathUtils';
 vi.mock('electron', () => ({
   clipboard: { write: vi.fn(), writeText: vi.fn() },
   dialog: { showMessageBox: vi.fn(), showOpenDialog: vi.fn(), showSaveDialog: vi.fn() },
-  shell: { openPath: vi.fn().mockResolvedValue(''), showItemInFolder: vi.fn() },
+  shell: { openPath: vi.fn().mockResolvedValue(''), showItemInFolder: vi.fn(), trashItem: vi.fn() },
 }));
 
 const temporaryDirectories: string[] = [];
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(shell.trashItem).mockReset().mockResolvedValue(undefined);
+});
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories
@@ -173,6 +176,82 @@ describe('live main artifact authorization', () => {
     expect(await invoke('read-artifact-file', 7, nextReport)).toMatchObject({
       error: expect.stringContaining('outside approved roots'),
     });
+  });
+
+  it('trashes an authorized output once and reports each denied or failed file honestly', async () => {
+    const { invoke, publish, reportPath, outputRoot, launchRoot } = await createMainFileIpc();
+    const failedFile = path.join(launchRoot, 'failed.md');
+    const deniedFile = path.join(outputRoot, 'private.md');
+    await fs.writeFile(failedFile, 'keep');
+    await fs.writeFile(deniedFile, 'private');
+    await publish([reportPath]);
+    vi.mocked(shell.trashItem).mockImplementation(async (filePath) => {
+      if (filePath === (await fs.realpath(failedFile))) {
+        throw Object.assign(new Error('Trash is unavailable'), { code: 'ENOENT' });
+      }
+    });
+    const result = await invoke('trash-artifact-files', 7, [
+      reportPath,
+      reportPath,
+      deniedFile,
+      failedFile,
+    ]);
+    expect(result).toEqual([
+      { path: reportPath, status: 'trashed' },
+      {
+        path: deniedFile,
+        status: 'failed',
+        error: expect.stringContaining('outside approved roots'),
+      },
+      { path: failedFile, status: 'failed', error: 'Trash is unavailable' },
+    ]);
+    expect(shell.trashItem).toHaveBeenCalledTimes(2);
+    expect(shell.trashItem).toHaveBeenCalledWith(await fs.realpath(reportPath));
+    expect(await fs.readFile(failedFile, 'utf8')).toBe('keep');
+    expect(await fs.readFile(deniedFile, 'utf8')).toBe('private');
+  });
+
+  it('does not trash folders, symlinks or another window’s session files', async () => {
+    const { invoke, publish, reportPath, launchRoot } = await createMainFileIpc();
+    await publish([reportPath]);
+    const link = path.join(launchRoot, 'link.md');
+    await fs.symlink(reportPath, link);
+    expect(await invoke('trash-artifact-files', 7, [launchRoot, link])).toEqual([
+      { path: launchRoot, status: 'failed', error: expect.stringContaining('Only regular files') },
+      { path: link, status: 'failed', error: expect.stringContaining('Only regular files') },
+    ]);
+    expect(await invoke('trash-artifact-files', 8, [reportPath])).toEqual([
+      {
+        path: reportPath,
+        status: 'failed',
+        error: expect.stringContaining('outside approved roots'),
+      },
+    ]);
+    expect(shell.trashItem).not.toHaveBeenCalled();
+  });
+
+  it('reports already-missing authorized files without claiming to have trashed them', async () => {
+    const { invoke, launchRoot } = await createMainFileIpc();
+    const missing = path.join(launchRoot, 'missing.md');
+    expect(await invoke('trash-artifact-files', 7, [missing])).toEqual([
+      { path: missing, status: 'missing' },
+    ]);
+    expect(shell.trashItem).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed and oversized Trash batches before touching any file', async () => {
+    const { invoke, reportPath } = await createMainFileIpc();
+    for (const requested of [
+      null,
+      [],
+      ['relative.md'],
+      [123],
+      [reportPath, '../escape.md'],
+      Array(501).fill(reportPath),
+    ]) {
+      await expect(invoke('trash-artifact-files', 7, requested)).rejects.toThrow('Select between');
+    }
+    expect(shell.trashItem).not.toHaveBeenCalled();
   });
 
   it('still rejects source files and directories as session document capabilities', async () => {

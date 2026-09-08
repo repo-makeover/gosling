@@ -43,6 +43,7 @@ import { MAX_RESEARCH_INITIAL_INPUTS } from '../../types/sessionExperience';
 import { SessionInputControls } from './SessionInputControls';
 import type { ResearchLibraryFile } from '../../utils/researchLibrary';
 import { documentTitleFromContent, supportsDocumentTitle } from '../../utils/documentTitle';
+import { ArtifactFileList } from './ArtifactFileList';
 
 const i18n = defineMessages({
   outputs: { id: 'artifactPane.outputs', defaultMessage: 'Outputs' },
@@ -324,6 +325,7 @@ export function ArtifactPane() {
     activeTabId,
     artifacts,
     closeTab,
+    forgetTrashedFiles,
     openFile,
     openArtifact,
     resolveFilePath,
@@ -354,26 +356,37 @@ export function ArtifactPane() {
     defaultSettings.outputFileExtensions
   );
   const receivedOutputFileExtensionsChange = useRef(false);
+  const researchLibraryRevision = useRef(0);
 
-  const refreshResearchLibrary = useCallback(async () => {
-    setResearchLibraryLoading(true);
-    setResearchLibraryError(false);
-    try {
-      const [libraryPath, listing] = await Promise.all([
-        window.electron.getResearchLibraryPath(),
-        window.electron.listResearchLibraryFiles(),
-      ]);
-      setResearchLibraryPath(libraryPath);
-      setResearchLibraryFiles(listing.files);
-      setResearchLibraryTruncated(listing.truncated);
-    } catch {
-      setResearchLibraryFiles([]);
-      setResearchLibraryTruncated(false);
-      setResearchLibraryError(true);
-    } finally {
-      setResearchLibraryLoading(false);
-    }
-  }, []);
+  const refreshResearchLibrary = useCallback(
+    async (background = false) => {
+      const revision = ++researchLibraryRevision.current;
+      if (!background) setResearchLibraryLoading(true);
+      setResearchLibraryError(false);
+      try {
+        const [libraryPath, listing] = await Promise.all([
+          window.electron.getResearchLibraryPath(),
+          window.electron.listResearchLibraryFiles(),
+        ]);
+        if (revision !== researchLibraryRevision.current) return;
+        setResearchLibraryPath(libraryPath);
+        setResearchLibraryFiles(listing.files);
+        setResearchLibraryTruncated(listing.truncated);
+      } catch {
+        if (revision !== researchLibraryRevision.current) return;
+        if (background) {
+          toast.error(intl.formatMessage(i18n.libraryLoadFailed));
+        } else {
+          setResearchLibraryFiles([]);
+          setResearchLibraryTruncated(false);
+          setResearchLibraryError(true);
+        }
+      } finally {
+        if (revision === researchLibraryRevision.current) setResearchLibraryLoading(false);
+      }
+    },
+    [intl]
+  );
 
   useEffect(() => {
     void refreshResearchLibrary();
@@ -830,31 +843,27 @@ export function ArtifactPane() {
                   {intl.formatMessage(i18n.libraryTruncated)}
                 </div>
               )}
-              <ul className="py-1" aria-label={intl.formatMessage(i18n.library)}>
-                {researchLibraryFiles.map((file) => (
-                  <li key={file.path}>
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-2 border-b border-border-primary px-3 py-2.5 text-left last:border-b-0 hover:bg-background-secondary/60"
-                      title={file.path}
-                      onClick={() => {
-                        openFile(file.path);
-                        setInventoryTab('outputs');
-                      }}
-                    >
-                      <FileText className="h-4 w-4 shrink-0 text-text-secondary" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs text-text-primary">
-                          {documentTitles[file.path] || file.name}
-                        </span>
-                        <span className="block truncate text-[10px] text-text-secondary">
-                          {file.relativePath} · {formatInputSize(file.sizeBytes)}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <ArtifactFileList
+                key={`library:${researchLibraryPath}`}
+                label={intl.formatMessage(i18n.library)}
+                items={researchLibraryFiles.map((file) => ({
+                  path: file.path,
+                  name: documentTitles[file.path] || file.name,
+                  detail: `${file.relativePath} · ${formatInputSize(file.sizeBytes)}`,
+                  active: false,
+                }))}
+                onOpen={(path) => {
+                  openFile(path);
+                  setInventoryTab('outputs');
+                }}
+                onDeleted={(paths) => {
+                  forgetTrashedFiles(paths);
+                  setResearchLibraryFiles((files) =>
+                    files.filter((file) => !paths.includes(file.path))
+                  );
+                  void refreshResearchLibrary(true);
+                }}
+              />
             </div>
           )}
         </div>
@@ -862,38 +871,31 @@ export function ArtifactPane() {
         <>
           {displayedArtifacts.length > 0 && (
             <div className="max-h-52 shrink-0 overflow-y-auto border-b border-border-primary py-1">
-              {displayedArtifacts.map((artifact) => {
-                const selected =
-                  activeTab?.source.type === 'file' &&
-                  activeTab.source.path === artifact.displayPath &&
-                  activeTab.source.baseDirectory === artifact.baseWorkingDir;
-                const status = artifactStatus(artifact.displayPath);
-                return (
-                  <button
-                    key={artifact.resolvedPath}
-                    type="button"
-                    onClick={() => openArtifact(artifact)}
-                    className={cn(
-                      'flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-background-secondary/60',
-                      selected && 'bg-background-secondary'
-                    )}
-                    title={artifact.resolvedPath}
-                  >
-                    <File className="h-4 w-4 shrink-0 text-text-secondary" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs text-text-primary">
-                        {documentTitles[artifact.displayPath] || artifact.displayPath}
-                      </span>
-                      <span className="block truncate text-[10px] text-text-secondary">
-                        {documentTitles[artifact.displayPath]
-                          ? `${artifact.displayPath} · ${artifact.relation}`
-                          : `${artifact.relation} · ${artifact.provenance.replace(/_/g, ' ')}`}
-                      </span>
-                    </span>
-                    {status && <span className="text-[10px] text-text-secondary">{status}</span>}
-                  </button>
-                );
-              })}
+              <ArtifactFileList
+                key={`outputs:${visibleSessionId}`}
+                label={intl.formatMessage(i18n.outputs)}
+                items={displayedArtifacts.map((artifact) => ({
+                  path: artifact.resolvedPath,
+                  name: documentTitles[artifact.displayPath] || artifact.displayPath,
+                  detail: documentTitles[artifact.displayPath]
+                    ? `${artifact.displayPath} · ${artifact.relation}`
+                    : `${artifact.relation} · ${artifact.provenance.replace(/_/g, ' ')}`,
+                  active:
+                    activeTab?.source.type === 'file' &&
+                    (activeTab.source.path === artifact.resolvedPath ||
+                      (activeTab.source.path === artifact.displayPath &&
+                        activeTab.source.baseDirectory === artifact.baseWorkingDir)),
+                  status: artifactStatus(artifact.displayPath) || undefined,
+                }))}
+                onOpen={(path) => {
+                  const artifact = displayedArtifacts.find((item) => item.resolvedPath === path);
+                  if (artifact) openArtifact(artifact);
+                }}
+                onDeleted={(paths) => {
+                  forgetTrashedFiles(paths);
+                  void refreshResearchLibrary(true);
+                }}
+              />
             </div>
           )}
 
@@ -926,7 +928,10 @@ export function ArtifactPane() {
 
           {activeTab && (
             <div className="shrink-0 border-b border-border-primary px-3 py-2">
-              <div className="truncate text-sm font-medium text-text-primary" title={previewTitle ?? activeTab.title}>
+              <div
+                className="truncate text-sm font-medium text-text-primary"
+                title={previewTitle ?? activeTab.title}
+              >
                 {previewTitle ?? activeTab.title}
               </div>
               <div

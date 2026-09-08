@@ -16,6 +16,7 @@ import { errorMessage } from '../utils/conversionUtils';
 import { expandTilde } from '../utils/pathUtils';
 import { readBoundedSessionImportFile } from '../utils/sessionImport';
 import { documentTitleFromContent, supportsDocumentTitle } from '../utils/documentTitle';
+import { ARTIFACT_TRASH_BATCH_LIMIT, type ArtifactTrashResult } from '../types/artifactTrash';
 
 type AssertRendererFileAccess = (webContentsId: number, filePath: string) => Promise<string>;
 type AssertRendererArtifactFileAccess = (
@@ -56,6 +57,7 @@ export const FILE_IPC_CHANNELS = [
   'reveal-artifact-file',
   'write-file',
   'delete-file',
+  'trash-artifact-files',
   'ensure-directory',
   'list-files',
   'show-message-box',
@@ -366,6 +368,58 @@ export function registerFileIpcHandlers(
       console.error('Error deleting file:', error);
       return false;
     }
+  });
+  targetIpcMain.handle('trash-artifact-files', async (event, requestedPaths: unknown) => {
+    if (
+      !Array.isArray(requestedPaths) ||
+      requestedPaths.length === 0 ||
+      requestedPaths.length > ARTIFACT_TRASH_BATCH_LIMIT ||
+      !requestedPaths.every(
+        (filePath) =>
+          typeof filePath === 'string' &&
+          filePath.length <= 4096 &&
+          !filePath.includes('\0') &&
+          path.isAbsolute(filePath)
+      )
+    ) {
+      throw new Error(`Select between 1 and ${ARTIFACT_TRASH_BATCH_LIMIT} local files.`);
+    }
+
+    const results: ArtifactTrashResult[] = [];
+    for (const filePath of new Set<string>(requestedPaths)) {
+      try {
+        const authorizedPath = await assertRendererArtifactFileAccess(event.sender.id, filePath);
+        const requestedFile = await fs.lstat(filePath).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return null;
+          throw error;
+        });
+        if (!requestedFile) {
+          results.push({ path: filePath, status: 'missing' });
+          continue;
+        }
+        if (!requestedFile.isFile()) {
+          throw new Error('Only regular files can be moved to Trash from this pane.');
+        }
+        const authorizedFile = await fs.lstat(authorizedPath);
+        if (
+          !authorizedFile.isFile() ||
+          requestedFile.dev !== authorizedFile.dev ||
+          requestedFile.ino !== authorizedFile.ino
+        ) {
+          throw new Error('The file changed while preparing deletion. Try again.');
+        }
+        // Trash failures must never fall back to permanent deletion.
+        await shell.trashItem(authorizedPath);
+        results.push({ path: filePath, status: 'trashed' });
+      } catch (error) {
+        results.push({
+          path: filePath,
+          status: 'failed',
+          error: errorMessage(error, 'Unable to move file to Trash.'),
+        });
+      }
+    }
+    return results;
   });
   // Enhanced file operations
   targetIpcMain.handle('ensure-directory', async (event, dirPath) => {

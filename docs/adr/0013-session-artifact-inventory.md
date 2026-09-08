@@ -46,3 +46,17 @@ display list.
 Files are never created, copied, moved, opened, or read merely because a record exists. Files created
 by arbitrary shell commands and never referenced remain undiscovered; a future bounded observer would
 require a separate decision.
+
+## Explicit file deletion (2026-09-08)
+
+Outputs support row deletion and checkbox-based batch deletion. After one confirmation naming
+the selected paths, Electron applies the existing per-window artifact guard and moves authorized
+regular files to the operating-system Trash. Directories and symbolic links are rejected; an OS
+Trash failure never falls back to permanent deletion. Each file has its own result, so failed
+items remain visible with an error and successful items close their previews.
+
+Backend discovery metadata is retained as provenance. Desktop persists dismissal of the deleted
+artifact's `resolvedPath`/`lastSeenAt` version in its session presentation state; a later inventory
+version at the same path can appear again. Research Library deletion reflects the actual directory
+contents and leaves separate copies elsewhere intact. Merely listing a file still grants no
+additional filesystem authority.
