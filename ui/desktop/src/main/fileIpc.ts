@@ -5,6 +5,7 @@
 import type { IpcMain, OpenDialogOptions, OpenDialogReturnValue } from 'electron';
 import { clipboard, dialog, shell } from 'electron';
 import { Buffer } from 'node:buffer';
+import { constants } from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,6 +53,7 @@ const CHECK_OLLAMA_TIMEOUT_MS = 5000;
 /// Upper bound on a single `read-file` IPC response. Matches the text
 /// preview limit used by `read-artifact-file`. (MEM-GSL-008)
 const READ_FILE_MAX_BYTES = 2 * 1024 * 1024;
+const COPY_ARTIFACT_MAX_BYTES = 20 * 1024 * 1024;
 
 export const FILE_IPC_CHANNELS = [
   'select-file-or-directory',
@@ -60,6 +62,7 @@ export const FILE_IPC_CHANNELS = [
   'check-ollama',
   'read-file',
   'read-artifact-file',
+  'copy-artifact-contents',
   'read-artifact-titles',
   'get-artifact-file-timestamps',
   'classify-artifact-repositories',
@@ -318,6 +321,56 @@ export function registerFileIpcHandlers(
           sizeBytes: 0,
           truncated: false,
         };
+      }
+    }
+  );
+
+  targetIpcMain.handle(
+    'copy-artifact-contents',
+    async (event, filePath: string, baseDirectory?: string) => {
+      const resolvedPath = await assertRendererArtifactFileAccess(
+        event.sender.id,
+        filePath,
+        baseDirectory
+      );
+      const handle = await fs.open(
+        resolvedPath,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+      );
+      try {
+        const stats = await handle.stat();
+        if (!stats.isFile()) throw new Error('The selected output is not a file');
+        if (stats.size > COPY_ARTIFACT_MAX_BYTES) {
+          throw new Error(
+            'Copy contents supports text files up to 20 MiB. Save a copy for larger files.'
+          );
+        }
+        const buffer = Buffer.alloc(stats.size + 1);
+        let total = 0;
+        while (total < buffer.length) {
+          const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+          if (bytesRead === 0) break;
+          total += bytesRead;
+        }
+        const current = await handle.stat();
+        if (
+          total !== stats.size ||
+          current.size !== stats.size ||
+          current.mtimeMs !== stats.mtimeMs
+        ) {
+          throw new Error('The file changed while copying. Try again.');
+        }
+        const contents = buffer.subarray(0, total);
+        if (contents.includes(0)) throw new Error('Copy contents supports UTF-8 text files only.');
+        let text: string;
+        try {
+          text = new TextDecoder('utf-8', { fatal: true }).decode(contents);
+        } catch {
+          throw new Error('Copy contents supports UTF-8 text files only.');
+        }
+        clipboard.writeText(text);
+      } finally {
+        await handle.close();
       }
     }
   );

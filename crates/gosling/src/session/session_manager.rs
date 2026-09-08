@@ -3,6 +3,7 @@ mod legacy_import;
 mod library_storage;
 mod message_storage;
 mod migrations;
+mod output_revisions_storage;
 mod pool_lifecycle;
 mod schema;
 mod session_crud;
@@ -51,7 +52,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use utoipa::ToSchema;
 
-pub const CURRENT_SCHEMA_VERSION: i32 = 31;
+pub const CURRENT_SCHEMA_VERSION: i32 = 32;
+
+pub use output_revisions_storage::OutputCapture;
 pub const SESSIONS_FOLDER: &str = "sessions";
 pub const DB_NAME: &str = "sessions.db";
 const MILLISECOND_TIMESTAMP_THRESHOLD: i64 = 10_000_000_000;

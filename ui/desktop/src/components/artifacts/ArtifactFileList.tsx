@@ -8,6 +8,7 @@ import { useArtifactFileTimestamps } from '../../hooks/useArtifactFileTimestamps
 import type { ArtifactFileTimestamps } from '../../types/artifactFileTimestamps';
 import { ARTIFACT_TRASH_BATCH_LIMIT, type ArtifactTrashResult } from '../../types/artifactTrash';
 import { Button } from '../ui/button';
+import { OutputHistory } from './OutputHistory';
 import {
   Dialog,
   DialogContent,
@@ -77,6 +78,8 @@ interface ArtifactFileListProps {
   label: string;
   onOpen: (path: string) => void;
   onDeleted: (paths: string[]) => void;
+  outputSessionId?: string;
+  onRestored?: () => void;
 }
 
 function FileTimestamps({ timestamps }: { timestamps: ArtifactFileTimestamps | null | undefined }) {
@@ -139,7 +142,14 @@ export async function trashArtifactFilesInBatches(
   return results;
 }
 
-export function ArtifactFileList({ items, label, onOpen, onDeleted }: ArtifactFileListProps) {
+export function ArtifactFileList({
+  items,
+  label,
+  onOpen,
+  onDeleted,
+  outputSessionId,
+  onRestored,
+}: ArtifactFileListProps) {
   const intl = useIntl();
   const timestamps = useArtifactFileTimestamps(items);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -296,6 +306,14 @@ export function ArtifactFileList({ items, label, onOpen, onDeleted }: ArtifactFi
               <p role="alert" className="break-words px-3 pb-2 text-xs text-text-secondary">
                 {errors[item.path]}
               </p>
+            )}
+            {outputSessionId && (
+              <OutputHistory
+                sessionId={outputSessionId}
+                path={item.path}
+                refreshKey={item.timestampRevision}
+                onRestored={onRestored}
+              />
             )}
           </li>
         ))}

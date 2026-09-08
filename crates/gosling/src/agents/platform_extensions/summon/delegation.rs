@@ -156,6 +156,15 @@ impl SummonClient {
             )
             .await
             .map_err(|e| format!("Failed to create subagent session: {}", e))?;
+        self.context
+            .session_manager
+            .merge_extension_state(
+                &subagent_session.id,
+                "output_agent.v1",
+                serde_json::json!({ "name": params.source, "parentSessionId": session_id }),
+            )
+            .await
+            .map_err(|e| format!("Failed to record subagent identity: {e}"))?;
 
         let (notif_tx, notif_rx) = tokio::sync::mpsc::unbounded_channel::<ServerNotification>();
         Self::spawn_notification_bridge(

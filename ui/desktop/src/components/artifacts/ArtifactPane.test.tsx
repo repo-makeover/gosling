@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { SessionArtifactDto } from '@repo-makeover/gosling-sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'react-toastify';
 import {
   ArtifactWorkbenchProvider,
   useArtifactWorkbench,
@@ -33,6 +34,7 @@ describe('ArtifactPane', () => {
   const saveArtifact = vi.fn();
   const readArtifactFile = vi.fn();
   const readArtifactTitles = vi.fn();
+  const copyArtifactContents = vi.fn();
   const trashArtifactFiles = vi.fn();
   const classifyArtifactRepositories = vi.fn();
 
@@ -53,6 +55,19 @@ describe('ArtifactPane', () => {
           }
         >
           Open image
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            openContent({
+              title: 'Note',
+              content: '# Note\n\nRésumé — 😀',
+              encoding: 'utf8',
+              mimeType: 'text/markdown',
+            })
+          }
+        >
+          Open text
         </button>
         <button
           type="button"
@@ -144,6 +159,7 @@ describe('ArtifactPane', () => {
       truncated: false,
     });
     readArtifactTitles.mockReset();
+    copyArtifactContents.mockReset().mockResolvedValue(undefined);
     readArtifactTitles.mockResolvedValue({});
     classifyArtifactRepositories.mockReset().mockResolvedValue({
       repositoryPaths: [],
@@ -157,6 +173,7 @@ describe('ArtifactPane', () => {
     Object.assign(window.electron, {
       readArtifactFile,
       readArtifactTitles,
+      copyArtifactContents,
       trashArtifactFiles,
       classifyArtifactRepositories,
     });
@@ -173,6 +190,132 @@ describe('ArtifactPane', () => {
       setVisibleSessionArtifacts: vi.fn(),
       setVisibleSessionWorkspaceId: vi.fn(),
     });
+  });
+
+  it('copies file contents separately from its path even when the preview is truncated', async () => {
+    const success = vi.spyOn(toast, 'success');
+    readArtifactFile.mockResolvedValue({
+      content: '# Preview prefix',
+      encoding: 'utf8',
+      error: null,
+      found: true,
+      filePath: '/outputs/report.md',
+      truncated: true,
+    });
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open file' })[0]);
+    const button = await screen.findByRole('button', { name: 'Copy contents' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(copyArtifactContents).toHaveBeenCalledWith('/outputs/report.md', '/outputs')
+    );
+    await waitFor(() => expect(success).toHaveBeenCalledWith('Contents copied'));
+    expect(window.electron.writeClipboardText).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy path' }));
+    expect(window.electron.writeClipboardText).toHaveBeenCalledWith('/outputs/report.md');
+  });
+
+  it('copies transient text with its original Markdown and Unicode', async () => {
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open text' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy contents' }));
+    await waitFor(() =>
+      expect(window.electron.writeClipboardText).toHaveBeenCalledWith('# Note\n\nRésumé — 😀')
+    );
+    expect(copyArtifactContents).not.toHaveBeenCalled();
+  });
+
+  it('reports copy contents failures without claiming success', async () => {
+    const success = vi.spyOn(toast, 'success');
+    const error = vi.spyOn(toast, 'error');
+    readArtifactFile.mockResolvedValue({
+      content: '# Report',
+      encoding: 'utf8',
+      error: null,
+      found: true,
+      filePath: '/outputs/report.md',
+      truncated: false,
+    });
+    copyArtifactContents.mockRejectedValue(new Error('Access revoked'));
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open file' })[0]);
+    const button = await screen.findByRole('button', { name: 'Copy contents' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith('Unable to copy contents: Access revoked')
+    );
+    expect(success).not.toHaveBeenCalled();
+    expect(button).toBeEnabled();
+  });
+
+  it('copies the newly selected text while an older file preview is still pending', async () => {
+    readArtifactFile.mockReturnValue(new Promise(() => {}));
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open file' })[0]);
+    expect(await screen.findByRole('button', { name: 'Copy contents' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Open text' }));
+    const button = screen.getByRole('button', { name: 'Copy contents' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(window.electron.writeClipboardText).toHaveBeenCalledWith('# Note\n\nRésumé — 😀')
+    );
+    expect(copyArtifactContents).not.toHaveBeenCalled();
+  });
+
+  it('disables copying contents while loading and for image previews', async () => {
+    let finish: (value: unknown) => void = () => {};
+    readArtifactFile.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: 'Open file' })[0]);
+    expect(await screen.findByRole('button', { name: 'Copy contents' })).toBeDisabled();
+    await act(async () =>
+      finish({ content: '', encoding: 'utf8', error: 'Missing', found: false, truncated: false })
+    );
+    expect(screen.getByRole('button', { name: 'Copy contents' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
+    expect(screen.getByRole('button', { name: 'Copy contents' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Copy contents' })).toHaveAttribute(
+      'title',
+      'Copy contents is available for text documents'
+    );
   });
 
   it('saves a full transient artifact through its originating workspace', async () => {

@@ -223,6 +223,12 @@ impl Agent {
         )
         .await;
 
+        let output_capture = self
+            .config
+            .session_manager
+            .prepare_output_capture(session, &tool_call, &request_id)
+            .await;
+
         let ctx = crate::agents::tool_execution::ToolCallContext::new(
             session.id.clone(),
             Some(session.working_dir.clone()),
@@ -269,7 +275,21 @@ impl Agent {
             action_required_stream,
         } = result;
         let durable_result = async move {
-            let terminal_result = result.await;
+            let mut terminal_result = result.await;
+            if let Ok(output) = terminal_result.as_mut() {
+                if output.is_error != Some(true) {
+                    let captured = match output_capture {
+                        Ok(Some(capture)) => {
+                            session_manager.finish_output_capture(capture, output).await
+                        }
+                        Ok(None) => Ok(()),
+                        Err(error) => Err(error),
+                    };
+                    if let Err(error) = captured {
+                        output.content.push(Content::text(format!("The tool completed, but output history could not be fully recorded: {error}")));
+                    }
+                }
+            }
             session_manager
                 .complete_tool_operation(&operation_id, &terminal_result)
                 .await

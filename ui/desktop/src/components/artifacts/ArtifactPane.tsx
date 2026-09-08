@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BookOpen,
+  ClipboardCopy,
   Copy,
   ExternalLink,
   File,
@@ -96,6 +97,16 @@ const i18n = defineMessages({
   },
   loading: { id: 'artifactPane.loading', defaultMessage: 'Loading…' },
   copyPath: { id: 'artifactPane.copyPath', defaultMessage: 'Copy path' },
+  copyContents: { id: 'artifactPane.copyContents', defaultMessage: 'Copy contents' },
+  copiedContents: { id: 'artifactPane.copiedContents', defaultMessage: 'Contents copied' },
+  copyContentsFailed: {
+    id: 'artifactPane.copyContentsFailed',
+    defaultMessage: 'Unable to copy contents: {error}',
+  },
+  copyContentsTextOnly: {
+    id: 'artifactPane.copyContentsTextOnly',
+    defaultMessage: 'Copy contents is available for text documents',
+  },
   reveal: { id: 'artifactPane.reveal', defaultMessage: 'Reveal' },
   openExternal: { id: 'artifactPane.openExternal', defaultMessage: 'Open externally' },
   saveCopy: { id: 'artifactPane.saveCopy', defaultMessage: 'Save a copy' },
@@ -374,6 +385,8 @@ export function ArtifactPane() {
   const [researchLibraryLoading, setResearchLibraryLoading] = useState(false);
   const [researchLibraryError, setResearchLibraryError] = useState(false);
   const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [previewRevision, setPreviewRevision] = useState(0);
+  const [copyingContents, setCopyingContents] = useState(false);
   const [documentTitles, setDocumentTitles] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [outputFileExtensions, setOutputFileExtensions] = useState<string[]>(
@@ -580,6 +593,9 @@ export function ArtifactPane() {
   }, [titleRequests, documentTitles]);
 
   useEffect(() => {
+    if (!activeTab || activeTab.source.type === 'content' || activeTab.kind === 'unknown') {
+      setLoading(false);
+    }
     if (!activeTab) {
       setPreview(null);
       return;
@@ -628,7 +644,7 @@ export function ArtifactPane() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, resolveFilePath]);
+  }, [activeTab, resolveFilePath, previewRevision]);
 
   const chooseFile = async () => {
     const selected = await window.electron.selectArtifactFile(
@@ -684,6 +700,37 @@ export function ArtifactPane() {
     return intl.formatMessage(
       /not found|no such file|missing/i.test(preview.error) ? i18n.missing : i18n.blocked
     );
+  };
+
+  const supportsCopyContents = activeTab && !['image', 'pdf', 'unknown'].includes(activeTab.kind);
+
+  const copyContents = async () => {
+    if (!activeTab || !supportsCopyContents || copyingContents || loading || preview?.error) return;
+    setCopyingContents(true);
+    try {
+      if (activeTab.source.type === 'file') {
+        await window.electron.copyArtifactContents(
+          activeTab.source.path,
+          activeTab.source.baseDirectory
+        );
+      } else {
+        const source = activeTab.source;
+        const text =
+          source.encoding === 'utf8'
+            ? source.content
+            : new TextDecoder('utf-8', { fatal: true }).decode(
+                Uint8Array.from(window.atob(source.content), (character) => character.charCodeAt(0))
+              );
+        await window.electron.writeClipboardText(text);
+      }
+      toast.success(intl.formatMessage(i18n.copiedContents));
+    } catch (cause) {
+      toast.error(
+        intl.formatMessage(i18n.copyContentsFailed, { error: errorMessage(cause, 'Unknown error') })
+      );
+    } finally {
+      setCopyingContents(false);
+    }
   };
 
   const saveCopy = async () => {
@@ -987,6 +1034,8 @@ export function ArtifactPane() {
             <div className="max-h-52 shrink-0 overflow-y-auto border-b border-border-primary py-1">
               <ArtifactFileList
                 key={`outputs:${visibleSessionId}:${hideRepositoryFiles}`}
+                outputSessionId={visibleSessionId ?? undefined}
+                onRestored={() => setPreviewRevision((revision) => revision + 1)}
                 label={intl.formatMessage(i18n.outputs)}
                 items={displayedArtifacts.map((artifact) => ({
                   path: artifact.resolvedPath,
@@ -1110,12 +1159,31 @@ export function ArtifactPane() {
               >
                 <Save className="h-3.5 w-3.5" />
               </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                title={intl.formatMessage(
+                  supportsCopyContents ? i18n.copyContents : i18n.copyContentsTextOnly
+                )}
+                aria-label={intl.formatMessage(i18n.copyContents)}
+                disabled={
+                  !supportsCopyContents ||
+                  loading ||
+                  !preview ||
+                  Boolean(preview.error) ||
+                  copyingContents
+                }
+                onClick={() => void copyContents()}
+              >
+                <ClipboardCopy className="h-3.5 w-3.5" />
+              </Button>
               {filePath && (
                 <>
                   <Button
                     variant="ghost"
                     size="xs"
                     title={intl.formatMessage(i18n.copyPath)}
+                    aria-label={intl.formatMessage(i18n.copyPath)}
                     onClick={() => void window.electron.writeClipboardText(filePath)}
                   >
                     <Copy className="h-3.5 w-3.5" />

@@ -1,0 +1,309 @@
+//! Bounded file observation for output history. Inventory listing never calls this module.
+
+use super::Session;
+use anyhow::{ensure, Result};
+use gosling_sdk_types::custom_requests::{OutputAttributionKind, OutputRevisionDto};
+use gosling_sdk_types::workspace::WorkspaceFolderAccess;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
+use std::fs;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+
+pub const MAX_OUTPUT_REVISION_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_CAPTURE_BYTES: usize = 32 * 1024 * 1024;
+const HISTORY_START: &str = "\n\n<!-- gosling:output-history:start -->\n";
+const HISTORY_END: &str = "<!-- gosling:output-history:end -->\n";
+
+#[derive(Clone)]
+pub(crate) struct OutputSnapshot {
+    pub bytes: Vec<u8>,
+    pub body: Vec<u8>,
+    pub hash: String,
+}
+
+pub(crate) fn digest(bytes: &[u8]) -> String {
+    crate::utils::bytes_to_hex(Sha256::digest(bytes))
+}
+
+pub(crate) fn is_output_document(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some(
+            "md" | "markdown"
+                | "txt"
+                | "csv"
+                | "tsv"
+                | "pdf"
+                | "doc"
+                | "docx"
+                | "rtf"
+                | "odt"
+                | "xlsx"
+                | "pptx"
+                | "html"
+                | "htm"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "svg"
+                | "webp"
+        )
+    )
+}
+
+pub(crate) fn output_roots(session: &Session) -> Vec<PathBuf> {
+    let mut roots = vec![
+        session.working_dir.join("Outputs"),
+        session.working_dir.join("outputs"),
+    ];
+    if let Some(context) = &session.workspace_context {
+        roots.extend(
+            context
+                .product_output_folders
+                .iter()
+                .map(|folder| PathBuf::from(&folder.path)),
+        );
+    }
+    roots
+        .into_iter()
+        .filter_map(|root| root.canonicalize().ok())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+pub(crate) fn canonical_output_path(
+    session: &Session,
+    path: &Path,
+    write: bool,
+) -> Result<PathBuf> {
+    ensure!(path.is_absolute(), "Output path must be absolute");
+    ensure!(
+        is_output_document(path),
+        "This file type does not support output history"
+    );
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        ensure!(
+            !metadata.file_type().is_symlink(),
+            "Output history does not follow symbolic links"
+        );
+    }
+    let resolved = match path.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = path
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("Output has no parent"))?;
+            parent.canonicalize()?.join(
+                path.file_name()
+                    .ok_or_else(|| anyhow::anyhow!("Output has no filename"))?,
+            )
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let roots = if let Some(context) = &session.workspace_context {
+        let policy = context.effective_folder_policy();
+        if write {
+            for root in &policy.roots {
+                if root.access == WorkspaceFolderAccess::Read {
+                    if let Ok(root) = Path::new(&root.path).canonicalize() {
+                        ensure!(!resolved.starts_with(root), "Output folder is read-only");
+                    }
+                }
+            }
+        }
+        policy
+            .roots
+            .into_iter()
+            .map(|root| PathBuf::from(root.path))
+            .collect::<Vec<_>>()
+    } else {
+        std::iter::once(session.working_dir.clone())
+            .chain(session.additional_working_dirs.clone())
+            .collect()
+    };
+    ensure!(
+        roots
+            .iter()
+            .filter_map(|root| root.canonicalize().ok())
+            .any(|root| resolved.starts_with(root)),
+        "Output path is outside this session's folders"
+    );
+    Ok(resolved)
+}
+
+pub(crate) fn read_snapshot(path: &Path) -> Result<Option<OutputSnapshot>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(value) => value,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    ensure!(
+        metadata.is_file() && !metadata.file_type().is_symlink(),
+        "Output must be a regular file"
+    );
+    ensure!(
+        metadata.len() <= MAX_OUTPUT_REVISION_BYTES as u64,
+        "Output exceeds the 8 MiB revision limit"
+    );
+    ensure!(
+        path.canonicalize()? == path,
+        "Output path changed while reading history"
+    );
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(path)?;
+    ensure!(file.metadata()?.is_file(), "Output must be a regular file");
+    let mut bytes = Vec::new();
+    file.take(MAX_OUTPUT_REVISION_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    ensure!(
+        path.canonicalize()? == path,
+        "Output path changed while reading history"
+    );
+    ensure!(
+        bytes.len() <= MAX_OUTPUT_REVISION_BYTES,
+        "Output exceeds the 8 MiB revision limit"
+    );
+    let body = markdown_body(path, &bytes);
+    Ok(Some(OutputSnapshot {
+        hash: digest(&bytes),
+        bytes,
+        body,
+    }))
+}
+
+pub(crate) fn markdown_body(path: &Path, bytes: &[u8]) -> Vec<u8> {
+    if is_markdown(path) {
+        if let Ok(text) = std::str::from_utf8(bytes) {
+            if text.ends_with(HISTORY_END) {
+                if let Some((body, _)) = text.rsplit_once(HISTORY_START) {
+                    return body.as_bytes().to_vec();
+                }
+            }
+        }
+    }
+    bytes.to_vec()
+}
+
+fn is_markdown(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown"))
+}
+
+fn table_cell(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('|', "&#124;")
+        .replace(['\n', '\r'], " ")
+}
+
+pub(crate) fn annotated_snapshot(
+    path: &Path,
+    body: &[u8],
+    revisions: &[OutputRevisionDto],
+) -> Vec<u8> {
+    if !is_markdown(path) || std::str::from_utf8(body).is_err() {
+        return body.to_vec();
+    }
+    let mut result = body.to_vec();
+    let mut footer = String::from(HISTORY_START);
+    footer.push_str("## Output contribution history\n\nRecorded by gosling. Observed changes identify the running agent; they are not proof of exclusive authorship.\n\n| Revision | Recorded (UTC) | Agent | Provider / selected model | Resolved model | Action | Attribution | Chat |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n");
+    for revision in revisions {
+        let contributor = &revision.contributor;
+        let attribution = match revision.attribution {
+            OutputAttributionKind::Tool => "Tool write",
+            OutputAttributionKind::Observed => "Observed during tool",
+            OutputAttributionKind::Unknown => "Unknown",
+            OutputAttributionKind::User => "User restore",
+        };
+        footer.push_str(&format!(
+            "| v{} | {} | {} | {} / {} | {} | {:?} | {} | {} ({}) |\n",
+            revision.version,
+            table_cell(&revision.recorded_at),
+            table_cell(&contributor.agent),
+            table_cell(contributor.provider.as_deref().unwrap_or("unknown")),
+            table_cell(contributor.selected_model.as_deref().unwrap_or("unknown")),
+            table_cell(contributor.resolved_model.as_deref().unwrap_or("unknown")),
+            revision.action,
+            attribution,
+            table_cell(&contributor.session_name),
+            table_cell(&contributor.session_id)
+        ));
+    }
+    footer.push_str(HISTORY_END);
+    result.extend_from_slice(footer.as_bytes());
+    result
+}
+
+pub(crate) fn replace_if_unchanged(
+    session: &Session,
+    path: &Path,
+    expected_hash: &str,
+    bytes: &[u8],
+) -> Result<()> {
+    let resolved = canonical_output_path(session, path, true)?;
+    ensure!(
+        resolved == path,
+        "Output path changed while recording history"
+    );
+    let current = read_snapshot(path)?.ok_or_else(|| anyhow::anyhow!("Output no longer exists"))?;
+    ensure!(
+        current.hash == expected_hash,
+        "Output changed; refresh its history before restoring"
+    );
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Output has no parent"))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary
+        .as_file()
+        .set_permissions(fs::metadata(path)?.permissions())?;
+    temporary.write_all(bytes)?;
+    temporary.as_file().sync_all()?;
+    ensure!(
+        read_snapshot(path)?.is_some_and(|snapshot| snapshot.hash == expected_hash),
+        "Output changed while recording history"
+    );
+    temporary.persist(path)?;
+    Ok(())
+}
+
+pub(crate) fn scan_output_roots(roots: &[PathBuf]) -> Result<BTreeSet<PathBuf>> {
+    let mut files = BTreeSet::new();
+    let mut pending: Vec<_> = roots.iter().cloned().map(|root| (root, 0)).collect();
+    let mut visited = 0;
+    while let Some((directory, depth)) = pending.pop() {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            visited += 1;
+            ensure!(
+                visited <= 2000,
+                "Output observation exceeded 2000 directory entries"
+            );
+            let kind = entry.file_type()?;
+            if kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() && depth < 4 && !entry.file_name().to_string_lossy().starts_with('.') {
+                pending.push((entry.path(), depth + 1));
+            } else if kind.is_file() && is_output_document(&entry.path()) {
+                files.insert(entry.path());
+                ensure!(files.len() <= 200, "Output observation exceeded 200 files");
+            }
+        }
+    }
+    Ok(files)
+}

@@ -1795,6 +1795,76 @@ export const zSearchSessionMessagesResponse_unstable = z.object({
     totalMatches: z.number().int().gte(0)
 });
 
+export const zListOutputRevisionsRequest_unstable = z.object({
+    sessionId: z.string(),
+    path: z.string(),
+    beforeVersion: z.number().int().nullish(),
+    limit: z.number().int().gte(0).nullish()
+});
+
+export const zOutputRevisionAction = z.enum([
+    'created',
+    'modified',
+    'baseline',
+    'restored'
+]);
+
+export const zOutputAttributionKind = z.enum([
+    'tool',
+    'observed',
+    'unknown',
+    'user'
+]);
+
+export const zOutputContributor = z.object({
+    agent: z.string(),
+    sessionId: z.string(),
+    sessionName: z.string(),
+    sourceId: z.string(),
+    provider: z.string().nullish(),
+    selectedModel: z.string().nullish(),
+    resolvedModel: z.string().nullish()
+});
+
+export const zOutputRevisionDto = z.object({
+    version: z.number().int(),
+    recordedAt: z.string(),
+    contentHash: z.string(),
+    sizeBytes: z.number().int().gte(0),
+    action: zOutputRevisionAction,
+    attribution: zOutputAttributionKind,
+    contributor: zOutputContributor,
+    restoredFrom: z.number().int().nullish()
+});
+
+export const zListOutputRevisionsResponse_unstable = z.object({
+    revisions: z.array(zOutputRevisionDto),
+    nextBeforeVersion: z.number().int().nullish()
+});
+
+export const zGetOutputRevisionRequest_unstable = z.object({
+    sessionId: z.string(),
+    path: z.string(),
+    version: z.number().int()
+});
+
+export const zGetOutputRevisionResponse_unstable = z.object({
+    revision: zOutputRevisionDto,
+    contentBase64: z.string(),
+    currentHash: z.string().nullish()
+});
+
+export const zRestoreOutputRevisionRequest_unstable = z.object({
+    sessionId: z.string(),
+    path: z.string(),
+    version: z.number().int(),
+    expectedCurrentHash: z.string()
+});
+
+export const zRestoreOutputRevisionResponse_unstable = z.object({
+    revision: zOutputRevisionDto
+});
+
 /**
  * Return durable compacted summary state for a session.
  */
@@ -2565,6 +2635,9 @@ export const zExtRequest = z.object({
             zListSessionMessagesRequest_unstable,
             zListSessionArtifactsRequest_unstable,
             zSearchSessionMessagesRequest_unstable,
+            zListOutputRevisionsRequest_unstable,
+            zGetOutputRevisionRequest_unstable,
+            zRestoreOutputRevisionRequest_unstable,
             zGetSessionSummaryRequest_unstable,
             zTruncateSessionConversationRequest_unstable,
             zUpdateSessionProjectRequest_unstable,
@@ -2668,6 +2741,9 @@ export const zExtResponse = z.union([
                 zListSessionMessagesResponse_unstable,
                 zListSessionArtifactsResponse_unstable,
                 zSearchSessionMessagesResponse_unstable,
+                zListOutputRevisionsResponse_unstable,
+                zGetOutputRevisionResponse_unstable,
+                zRestoreOutputRevisionResponse_unstable,
                 zGetSessionSummaryResponse_unstable,
                 zCreateSourceResponse_unstable,
                 zListSourcesResponse_unstable,

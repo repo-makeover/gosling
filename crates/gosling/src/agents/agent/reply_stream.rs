@@ -12,16 +12,16 @@ impl Agent {
         model_config: &ModelConfig,
     ) -> Option<InferenceMetadata> {
         let requested_model = model_config.model_name.clone();
-        provider
+        let resolved_model = provider
             .fetch_model_info(&requested_model)
             .await
             .ok()
-            .and_then(|model_info| model_info.resolved_model)
-            .map(|resolved_model| InferenceMetadata {
-                provider: provider.get_name().to_string(),
-                requested_model,
-                resolved_model: Some(resolved_model),
-            })
+            .and_then(|model_info| model_info.resolved_model);
+        Some(InferenceMetadata {
+            provider: provider.get_name().to_string(),
+            requested_model,
+            resolved_model,
+        })
     }
 
     pub(super) async fn reply_internal(
@@ -476,6 +476,9 @@ impl Agent {
 
                                 let mut request_msg = Message::assistant()
                                     .with_id(format!("msg_{}", Uuid::new_v4()));
+                                if let Some(inference) = inference.as_ref() {
+                                    request_msg = request_msg.with_inference(inference.clone());
+                                }
                                 for thinking in &response_thinking {
                                     request_msg = request_msg.with_content(thinking.clone());
                                 }

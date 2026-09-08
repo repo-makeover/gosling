@@ -780,6 +780,7 @@ impl SessionStorage {
                 .execute(&mut **tx)
                 .await?;
             }
+            32 => Self::create_output_revisions_schema(tx).await?,
             _ => {
                 anyhow::bail!("Unknown migration version: {}", version);
             }

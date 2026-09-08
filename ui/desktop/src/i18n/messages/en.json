@@ -89,6 +89,18 @@
   "artifactPane.closePane": {
     "defaultMessage": "Close inputs and outputs pane"
   },
+  "artifactPane.copiedContents": {
+    "defaultMessage": "Contents copied"
+  },
+  "artifactPane.copyContents": {
+    "defaultMessage": "Copy contents"
+  },
+  "artifactPane.copyContentsFailed": {
+    "defaultMessage": "Unable to copy contents: {error}"
+  },
+  "artifactPane.copyContentsTextOnly": {
+    "defaultMessage": "Copy contents is available for text documents"
+  },
   "artifactPane.copyPath": {
     "defaultMessage": "Copy path"
   },
@@ -1870,6 +1882,75 @@
   },
   "onboardingSuccess.getStarted": {
     "defaultMessage": "Get Started"
+  },
+  "outputHistory.baseline": {
+    "defaultMessage": "Saved pre-existing content"
+  },
+  "outputHistory.binary": {
+    "defaultMessage": "Preview is available for text documents. Export this revision to open it in its application."
+  },
+  "outputHistory.cancel": {
+    "defaultMessage": "Cancel"
+  },
+  "outputHistory.compare": {
+    "defaultMessage": "Compare with previous"
+  },
+  "outputHistory.confirmRestore": {
+    "defaultMessage": "Restore v{version} to this file? The current contents will be preserved and the restore will create a new revision."
+  },
+  "outputHistory.empty": {
+    "defaultMessage": "No saved revisions. History begins with new changes observed by gosling; earlier authors are unknown."
+  },
+  "outputHistory.export": {
+    "defaultMessage": "Export revision"
+  },
+  "outputHistory.history": {
+    "defaultMessage": "History"
+  },
+  "outputHistory.loading": {
+    "defaultMessage": "Loading history…"
+  },
+  "outputHistory.model": {
+    "defaultMessage": "Selected: {selected} · Actual: {actual} · Provider: {provider}"
+  },
+  "outputHistory.more": {
+    "defaultMessage": "Load older revisions"
+  },
+  "outputHistory.note": {
+    "defaultMessage": "Observed changes identify the running agent, not exclusive authorship. Reading a file does not add authorship."
+  },
+  "outputHistory.observed": {
+    "defaultMessage": "Observed during tool execution"
+  },
+  "outputHistory.preview": {
+    "defaultMessage": "Saved content · v{version}"
+  },
+  "outputHistory.previous": {
+    "defaultMessage": "Previous content · v{version}"
+  },
+  "outputHistory.refresh": {
+    "defaultMessage": "Refresh"
+  },
+  "outputHistory.restore": {
+    "defaultMessage": "Restore revision"
+  },
+  "outputHistory.title": {
+    "defaultMessage": "Output history"
+  },
+  "outputHistory.tool": {
+    "defaultMessage": "Tool write"
+  },
+  "outputHistory.truncated": {
+    "defaultMessage": "Preview limited to 200,000 characters. Export preserves the complete file."
+  },
+  "outputHistory.unavailable": {
+    "defaultMessage": "History unavailable"
+  },
+  "outputHistory.unknown": {
+    "defaultMessage": "Unknown"
+  },
+  "outputHistory.user": {
+    "defaultMessage": "User restore"
   },
   "permissionModal.allTools": {
     "defaultMessage": "All tools in this extension"

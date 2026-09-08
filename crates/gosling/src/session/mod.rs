@@ -8,6 +8,7 @@ mod legacy;
 pub mod library;
 #[cfg(feature = "nostr")]
 pub mod nostr_share;
+pub mod output_revisions;
 pub mod research;
 pub mod session_manager;
 mod session_naming;

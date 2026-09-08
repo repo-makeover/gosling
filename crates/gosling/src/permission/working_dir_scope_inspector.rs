@@ -735,7 +735,10 @@ fn referenced_paths(tool_call: &CallToolRequestParams, working_dir: &Path) -> Ve
 /// Paths a call may change. Shell pipelines are judged per segment so a
 /// read-only `cat` of reference material does not count against a later
 /// segment that only writes inside the session's folders.
-fn mutation_paths(tool_call: &CallToolRequestParams, working_dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn mutation_paths(
+    tool_call: &CallToolRequestParams,
+    working_dir: &Path,
+) -> Vec<PathBuf> {
     if !is_shell_tool(tool_call) {
         return if is_mutating_tool_call(tool_call) {
             referenced_paths(tool_call, working_dir)
@@ -788,7 +791,7 @@ fn first_read_only_path(
     Ok(None)
 }
 
-fn is_mutating_tool_call(tool_call: &CallToolRequestParams) -> bool {
+pub(crate) fn is_mutating_tool_call(tool_call: &CallToolRequestParams) -> bool {
     let name = tool_call.name.to_ascii_lowercase();
     let operation = name.rsplit("__").next().unwrap_or(&name);
     let mutation_markers = [

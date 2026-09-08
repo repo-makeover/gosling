@@ -2114,6 +2114,66 @@ export type SessionMessageSearchMatch = {
     beforeCursor?: string | null;
 };
 
+export type ListOutputRevisionsRequest_unstable = {
+    sessionId: string;
+    path: string;
+    beforeVersion?: number | null;
+    limit?: number | null;
+};
+
+export type ListOutputRevisionsResponse_unstable = {
+    revisions: Array<OutputRevisionDto>;
+    nextBeforeVersion?: number | null;
+};
+
+export type OutputRevisionDto = {
+    version: number;
+    recordedAt: string;
+    contentHash: string;
+    sizeBytes: number;
+    action: OutputRevisionAction;
+    attribution: OutputAttributionKind;
+    contributor: OutputContributor;
+    restoredFrom?: number | null;
+};
+
+export type OutputRevisionAction = 'created' | 'modified' | 'baseline' | 'restored';
+
+export type OutputAttributionKind = 'tool' | 'observed' | 'unknown' | 'user';
+
+export type OutputContributor = {
+    agent: string;
+    sessionId: string;
+    sessionName: string;
+    sourceId: string;
+    provider?: string | null;
+    selectedModel?: string | null;
+    resolvedModel?: string | null;
+};
+
+export type GetOutputRevisionRequest_unstable = {
+    sessionId: string;
+    path: string;
+    version: number;
+};
+
+export type GetOutputRevisionResponse_unstable = {
+    revision: OutputRevisionDto;
+    contentBase64: string;
+    currentHash?: string | null;
+};
+
+export type RestoreOutputRevisionRequest_unstable = {
+    sessionId: string;
+    path: string;
+    version: number;
+    expectedCurrentHash: string;
+};
+
+export type RestoreOutputRevisionResponse_unstable = {
+    revision: OutputRevisionDto;
+};
+
 /**
  * Return durable compacted summary state for a session.
  */
@@ -2840,14 +2900,14 @@ export type DomainAdapterStatus = 'ready' | 'crashed' | 'hung' | 'incompatible';
 export type ExtRequest = {
     id: string;
     method: string;
-    params?: ShellProvisioningReadRequest_unstable | ShellProvisioningValidateRequest_unstable | ShellDirectoryValidateRequest_unstable | ShellCredentialListRequest_unstable | ShellModuleListRequest_unstable | ShellArtifactListRequest_unstable | ShellLibraryListRequest_unstable | ShellLibraryAddTextRequest_unstable | ShellLibraryAddImageRequest_unstable | ShellLibraryLinkFileRequest_unstable | ShellLibraryRemoveRequest_unstable | ShellLibraryResolveRequest_unstable | DomainSnapshotRequest_unstable | DomainActionRequest_unstable | DomainActionConfirmRequest_unstable | ShellHandoffPrepareRequest_unstable | AddSessionExtensionRequest_unstable | RemoveSessionExtensionRequest_unstable | GetToolsRequest_unstable | SetToolPermissionsRequest_unstable | GoslingToolCallRequest_unstable | ReadResourceRequest_unstable | UpdateWorkingDirRequest_unstable | AddSessionWorkingDirRequest_unstable | RemoveSessionWorkingDirRequest_unstable | SetSessionWorkingDirRestrictionRequest_unstable | SetSessionSystemPromptRequest_unstable | SteerSessionRequest_unstable | DiagnosticsGetRequest_unstable | ListPromptsRequest_unstable | GetPromptRequest_unstable | SavePromptRequest_unstable | ResetPromptRequest_unstable | DeleteSessionRequest | GetConfigExtensionsRequest_unstable | GetAvailableExtensionsRequest_unstable | AddConfigExtensionRequest_unstable | RemoveConfigExtensionRequest_unstable | SetConfigExtensionEnabledRequest_unstable | GetSessionExtensionsRequest_unstable | ListProvidersRequest_unstable | ProviderSupportedModelsListRequest_unstable | SummarizerModelsListRequest_unstable | ProviderCatalogListRequest_unstable | ProviderSetupCatalogListRequest_unstable | ProviderCatalogTemplateRequest_unstable | CustomProviderCreateRequest_unstable | CustomProviderReadRequest_unstable | CustomProviderUpdateRequest_unstable | CustomProviderDeleteRequest_unstable | RefreshProviderInventoryRequest_unstable | ProviderConfigReadRequest_unstable | ProviderConfigStatusRequest_unstable | ProviderConfigSaveRequest_unstable | ProviderConfigDeleteRequest_unstable | ProviderConfigAuthenticateRequest_unstable | ProviderSecretsListRequest_unstable | ProviderSecretDeleteRequest_unstable | ProviderSecretCustomAddRequest_unstable | CanonicalModelInfoRequest_unstable | PreferencesReadRequest_unstable | PreferencesSaveRequest_unstable | PreferencesRemoveRequest_unstable | ConfigReadRequest_unstable | ConfigUpsertRequest_unstable | ConfigRemoveRequest_unstable | ConfigReadAllRequest_unstable | DefaultsReadRequest_unstable | DefaultsSaveRequest_unstable | DefaultsClearRequest_unstable | OnboardingImportScanRequest_unstable | OnboardingImportApplyRequest_unstable | ExportSessionRequest_unstable | ImportSessionRequest_unstable | ShareSessionNostrRequest_unstable | GetSessionInfoRequest_unstable | RecordSessionModelSwitchRequest_unstable | ListSessionMessagesRequest_unstable | ListSessionArtifactsRequest_unstable | SearchSessionMessagesRequest_unstable | GetSessionSummaryRequest_unstable | TruncateSessionConversationRequest_unstable | UpdateSessionProjectRequest_unstable | RenameSessionRequest_unstable | ArchiveSessionRequest_unstable | UnarchiveSessionRequest_unstable | CreateSourceRequest_unstable | ListSourcesRequest_unstable | ListAgentMentionsRequest_unstable | ListSlashCommandsRequest_unstable | UpdateSourceRequest_unstable | DeleteSourceRequest_unstable | ExportSourceRequest_unstable | ImportSourcesRequest_unstable | DictationTranscribeRequest_unstable | DictationConfigRequest_unstable | DictationSecretSaveRequest_unstable | DictationSecretDeleteRequest_unstable | DictationModelSelectRequest_unstable | WorkspaceListRequest_unstable | WorkspaceCreateRequest_unstable | WorkspaceUpdateRequest_unstable | WorkspaceDuplicateRequest_unstable | WorkspaceDeleteRequest_unstable | WorkspaceSetActiveRequest_unstable | WorkspaceValidateRequest_unstable | WorkspaceExportRequest_unstable | WorkspaceImportRequest_unstable | WorkspaceCreateOutputFolderRequest_unstable | CredentialProfileListRequest_unstable | CredentialProfileCreateRequest_unstable | CredentialProfileUpdateRequest_unstable | CredentialProfileDeleteRequest_unstable | CredentialProfileUsageRequest_unstable | CredentialProfileTestRequest_unstable | {
+    params?: ShellProvisioningReadRequest_unstable | ShellProvisioningValidateRequest_unstable | ShellDirectoryValidateRequest_unstable | ShellCredentialListRequest_unstable | ShellModuleListRequest_unstable | ShellArtifactListRequest_unstable | ShellLibraryListRequest_unstable | ShellLibraryAddTextRequest_unstable | ShellLibraryAddImageRequest_unstable | ShellLibraryLinkFileRequest_unstable | ShellLibraryRemoveRequest_unstable | ShellLibraryResolveRequest_unstable | DomainSnapshotRequest_unstable | DomainActionRequest_unstable | DomainActionConfirmRequest_unstable | ShellHandoffPrepareRequest_unstable | AddSessionExtensionRequest_unstable | RemoveSessionExtensionRequest_unstable | GetToolsRequest_unstable | SetToolPermissionsRequest_unstable | GoslingToolCallRequest_unstable | ReadResourceRequest_unstable | UpdateWorkingDirRequest_unstable | AddSessionWorkingDirRequest_unstable | RemoveSessionWorkingDirRequest_unstable | SetSessionWorkingDirRestrictionRequest_unstable | SetSessionSystemPromptRequest_unstable | SteerSessionRequest_unstable | DiagnosticsGetRequest_unstable | ListPromptsRequest_unstable | GetPromptRequest_unstable | SavePromptRequest_unstable | ResetPromptRequest_unstable | DeleteSessionRequest | GetConfigExtensionsRequest_unstable | GetAvailableExtensionsRequest_unstable | AddConfigExtensionRequest_unstable | RemoveConfigExtensionRequest_unstable | SetConfigExtensionEnabledRequest_unstable | GetSessionExtensionsRequest_unstable | ListProvidersRequest_unstable | ProviderSupportedModelsListRequest_unstable | SummarizerModelsListRequest_unstable | ProviderCatalogListRequest_unstable | ProviderSetupCatalogListRequest_unstable | ProviderCatalogTemplateRequest_unstable | CustomProviderCreateRequest_unstable | CustomProviderReadRequest_unstable | CustomProviderUpdateRequest_unstable | CustomProviderDeleteRequest_unstable | RefreshProviderInventoryRequest_unstable | ProviderConfigReadRequest_unstable | ProviderConfigStatusRequest_unstable | ProviderConfigSaveRequest_unstable | ProviderConfigDeleteRequest_unstable | ProviderConfigAuthenticateRequest_unstable | ProviderSecretsListRequest_unstable | ProviderSecretDeleteRequest_unstable | ProviderSecretCustomAddRequest_unstable | CanonicalModelInfoRequest_unstable | PreferencesReadRequest_unstable | PreferencesSaveRequest_unstable | PreferencesRemoveRequest_unstable | ConfigReadRequest_unstable | ConfigUpsertRequest_unstable | ConfigRemoveRequest_unstable | ConfigReadAllRequest_unstable | DefaultsReadRequest_unstable | DefaultsSaveRequest_unstable | DefaultsClearRequest_unstable | OnboardingImportScanRequest_unstable | OnboardingImportApplyRequest_unstable | ExportSessionRequest_unstable | ImportSessionRequest_unstable | ShareSessionNostrRequest_unstable | GetSessionInfoRequest_unstable | RecordSessionModelSwitchRequest_unstable | ListSessionMessagesRequest_unstable | ListSessionArtifactsRequest_unstable | SearchSessionMessagesRequest_unstable | ListOutputRevisionsRequest_unstable | GetOutputRevisionRequest_unstable | RestoreOutputRevisionRequest_unstable | GetSessionSummaryRequest_unstable | TruncateSessionConversationRequest_unstable | UpdateSessionProjectRequest_unstable | RenameSessionRequest_unstable | ArchiveSessionRequest_unstable | UnarchiveSessionRequest_unstable | CreateSourceRequest_unstable | ListSourcesRequest_unstable | ListAgentMentionsRequest_unstable | ListSlashCommandsRequest_unstable | UpdateSourceRequest_unstable | DeleteSourceRequest_unstable | ExportSourceRequest_unstable | ImportSourcesRequest_unstable | DictationTranscribeRequest_unstable | DictationConfigRequest_unstable | DictationSecretSaveRequest_unstable | DictationSecretDeleteRequest_unstable | DictationModelSelectRequest_unstable | WorkspaceListRequest_unstable | WorkspaceCreateRequest_unstable | WorkspaceUpdateRequest_unstable | WorkspaceDuplicateRequest_unstable | WorkspaceDeleteRequest_unstable | WorkspaceSetActiveRequest_unstable | WorkspaceValidateRequest_unstable | WorkspaceExportRequest_unstable | WorkspaceImportRequest_unstable | WorkspaceCreateOutputFolderRequest_unstable | CredentialProfileListRequest_unstable | CredentialProfileCreateRequest_unstable | CredentialProfileUpdateRequest_unstable | CredentialProfileDeleteRequest_unstable | CredentialProfileUsageRequest_unstable | CredentialProfileTestRequest_unstable | {
         [key: string]: unknown;
     } | null;
 };
 
 export type ExtResponse = {
     id: string;
-    result?: ShellProvisioningReadResponse_unstable | ShellProvisioningValidateResponse_unstable | ShellDirectoryValidateResponse_unstable | ShellCredentialListResponse_unstable | ShellModuleListResponse_unstable | ShellArtifactListResponse_unstable | ShellLibraryListResponse_unstable | ShellLibraryAddResponse_unstable | ShellLibraryRemoveResponse_unstable | ShellLibraryResolveResponse_unstable | DomainSnapshotResponse_unstable | DomainActionResponse_unstable | DomainActionConfirmResponse_unstable | ShellHandoffPrepareResponse_unstable | EmptyResponse | GetToolsResponse_unstable | SetToolPermissionsResponse_unstable | GoslingToolCallResponse_unstable | ReadResourceResponse_unstable | SessionWorkingDirsResponse_unstable | SteerSessionResponse_unstable | DiagnosticsGetResponse_unstable | ListPromptsResponse_unstable | GetPromptResponse_unstable | PromptOperationResponse_unstable | GetConfigExtensionsResponse_unstable | GetAvailableExtensionsResponse_unstable | GetSessionExtensionsResponse_unstable | ListProvidersResponse_unstable | ProviderSupportedModelsListResponse_unstable | SummarizerModelsListResponse_unstable | ProviderCatalogListResponse_unstable | ProviderSetupCatalogListResponse_unstable | ProviderCatalogTemplateResponse_unstable | CustomProviderCreateResponse_unstable | CustomProviderReadResponse_unstable | CustomProviderUpdateResponse_unstable | CustomProviderDeleteResponse_unstable | RefreshProviderInventoryResponse_unstable | ProviderConfigReadResponse_unstable | ProviderConfigStatusResponse_unstable | ProviderConfigChangeResponse_unstable | ProviderSecretsListResponse_unstable | CanonicalModelInfoResponse_unstable | PreferencesReadResponse_unstable | ConfigReadResponse_unstable | ConfigReadAllResponse_unstable | DefaultsReadResponse_unstable | OnboardingImportScanResponse_unstable | OnboardingImportApplyResponse_unstable | ExportSessionResponse_unstable | ImportSessionResponse_unstable | ShareSessionNostrResponse_unstable | GetSessionInfoResponse_unstable | RecordSessionModelSwitchResponse_unstable | ListSessionMessagesResponse_unstable | ListSessionArtifactsResponse_unstable | SearchSessionMessagesResponse_unstable | GetSessionSummaryResponse_unstable | CreateSourceResponse_unstable | ListSourcesResponse_unstable | ListAgentMentionsResponse_unstable | ListSlashCommandsResponse_unstable | UpdateSourceResponse_unstable | ExportSourceResponse_unstable | ImportSourcesResponse_unstable | DictationTranscribeResponse_unstable | DictationConfigResponse_unstable | WorkspaceListResponse_unstable | WorkspaceResponse_unstable | WorkspaceDeleteResponse_unstable | WorkspaceValidationResponse_unstable | WorkspaceExportResponse_unstable | CredentialProfileListResponse_unstable | CredentialProfileResponse_unstable | CredentialProfileDeleteResponse_unstable | CredentialProfileUsageResponse_unstable | CredentialProfileTestResponse_unstable | unknown;
+    result?: ShellProvisioningReadResponse_unstable | ShellProvisioningValidateResponse_unstable | ShellDirectoryValidateResponse_unstable | ShellCredentialListResponse_unstable | ShellModuleListResponse_unstable | ShellArtifactListResponse_unstable | ShellLibraryListResponse_unstable | ShellLibraryAddResponse_unstable | ShellLibraryRemoveResponse_unstable | ShellLibraryResolveResponse_unstable | DomainSnapshotResponse_unstable | DomainActionResponse_unstable | DomainActionConfirmResponse_unstable | ShellHandoffPrepareResponse_unstable | EmptyResponse | GetToolsResponse_unstable | SetToolPermissionsResponse_unstable | GoslingToolCallResponse_unstable | ReadResourceResponse_unstable | SessionWorkingDirsResponse_unstable | SteerSessionResponse_unstable | DiagnosticsGetResponse_unstable | ListPromptsResponse_unstable | GetPromptResponse_unstable | PromptOperationResponse_unstable | GetConfigExtensionsResponse_unstable | GetAvailableExtensionsResponse_unstable | GetSessionExtensionsResponse_unstable | ListProvidersResponse_unstable | ProviderSupportedModelsListResponse_unstable | SummarizerModelsListResponse_unstable | ProviderCatalogListResponse_unstable | ProviderSetupCatalogListResponse_unstable | ProviderCatalogTemplateResponse_unstable | CustomProviderCreateResponse_unstable | CustomProviderReadResponse_unstable | CustomProviderUpdateResponse_unstable | CustomProviderDeleteResponse_unstable | RefreshProviderInventoryResponse_unstable | ProviderConfigReadResponse_unstable | ProviderConfigStatusResponse_unstable | ProviderConfigChangeResponse_unstable | ProviderSecretsListResponse_unstable | CanonicalModelInfoResponse_unstable | PreferencesReadResponse_unstable | ConfigReadResponse_unstable | ConfigReadAllResponse_unstable | DefaultsReadResponse_unstable | OnboardingImportScanResponse_unstable | OnboardingImportApplyResponse_unstable | ExportSessionResponse_unstable | ImportSessionResponse_unstable | ShareSessionNostrResponse_unstable | GetSessionInfoResponse_unstable | RecordSessionModelSwitchResponse_unstable | ListSessionMessagesResponse_unstable | ListSessionArtifactsResponse_unstable | SearchSessionMessagesResponse_unstable | ListOutputRevisionsResponse_unstable | GetOutputRevisionResponse_unstable | RestoreOutputRevisionResponse_unstable | GetSessionSummaryResponse_unstable | CreateSourceResponse_unstable | ListSourcesResponse_unstable | ListAgentMentionsResponse_unstable | ListSlashCommandsResponse_unstable | UpdateSourceResponse_unstable | ExportSourceResponse_unstable | ImportSourcesResponse_unstable | DictationTranscribeResponse_unstable | DictationConfigResponse_unstable | WorkspaceListResponse_unstable | WorkspaceResponse_unstable | WorkspaceDeleteResponse_unstable | WorkspaceValidationResponse_unstable | WorkspaceExportResponse_unstable | CredentialProfileListResponse_unstable | CredentialProfileResponse_unstable | CredentialProfileDeleteResponse_unstable | CredentialProfileUsageResponse_unstable | CredentialProfileTestResponse_unstable | unknown;
 } | {
     error: {
         code: number;

@@ -165,7 +165,34 @@ If creation time is unavailable, **Created: Unavailable** is shown. Missing or i
 remain listed with **File timestamps unavailable**. Reading timestamps does not open the file or
 grant additional access.
 
+### Output agents and revision history
+
+Supported document rows in **Outputs** show the latest saved version, agent, and selected model.
+Choose **History** to see contributors, providers, selected and actual models when known, recording
+times, and the originating chats. Multiple agents append revisions to the same output path. Old
+products start with unknown attribution; reading or referencing a file does not claim authorship.
+
+Select a revision to preview it, compare text with its previous revision, or **Export revision** to
+save its original bytes. **Restore revision** asks for confirmation, preserves current contents, and
+adds a new revision. If the file changed since you opened history, refresh before restoring. A
+missing file can be exported from history but is not recreated by restore.
+
+Markdown reports in configured output folders or the working directory's `Outputs` folder also
+contain a contribution-history footer. Other formats retain their contents. History begins with new
+successful changes made through gosling's hosted tools; externally executed agents and edits made
+outside those observations are not continuously tracked. Observed attribution names the running
+agent without claiming exclusive authorship. The limit is 8 MiB per revision and 1,000 revisions per
+path; a capture failure appears in the tool result. Saved revisions remain in the local session
+database after a chat is deleted or its output is trashed. This is local history, without Git commits
+or cross-device synchronization.
+
 ### Save, export, and download
+
+The preview toolbar has separate **Copy contents** and **Copy path** buttons. **Copy contents**
+copies the complete UTF-8 text of the selected output or Library document, preserving Markdown,
+code, or data formatting even when its preview is truncated. It also supports text sent directly
+to the pane. Images, PDFs, and unsupported binary documents cannot be copied as text. Files over
+20 MiB show an error instead of copying a partial document; use **Save a copy** for those files.
 
 gosling's artifact router applies the same rule to every Desktop-owned save, export, and native
 download. It recognizes documents, spreadsheets, presentations, images, video, code, data,

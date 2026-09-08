@@ -1182,3 +1182,103 @@ fn test_custom_provider_supported_models_lists_raw_provider_models() {
         );
     });
 }
+
+#[test]
+#[serial]
+fn test_custom_output_revision_history_export_and_restore() {
+    use gosling::conversation::message::{InferenceMetadata, Message};
+    use gosling::session::{SessionManager, SessionType};
+    use rmcp::model::{CallToolRequestParams, CallToolResult};
+    write_acp_global_config(DEFAULT_ACP_TEST_CONFIG);
+    run_test(async move {
+        let openai = OpenAiFixture::new(vec![], Arc::new(IgnoreSessionId)).await;
+        let conn = AcpServerConnection::new(TestConnectionConfig::default(), openai).await;
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("Outputs")).unwrap();
+        let path = root.join("Outputs/report.md");
+        let manager = SessionManager::new(conn.data_root());
+        let session = manager
+            .create_session(
+                root,
+                "Output RPC".into(),
+                SessionType::User,
+                gosling::config::GoslingMode::Auto,
+            )
+            .await
+            .unwrap();
+        let call = CallToolRequestParams::new("developer__write").with_arguments(
+            rmcp::object!({ "path": path.to_string_lossy(), "content": "# Report" }),
+        );
+        let message = Message::assistant()
+            .with_generated_id()
+            .with_inference(InferenceMetadata {
+                provider: "test".into(),
+                requested_model: "selected".into(),
+                resolved_model: None,
+            })
+            .with_tool_request("write-report", Ok(call.clone()));
+        manager.add_message(&session.id, &message).await.unwrap();
+        let capture = manager
+            .prepare_output_capture(&session, &call, "write-report")
+            .await
+            .unwrap()
+            .unwrap();
+        std::fs::write(&path, "# Report").unwrap();
+        manager
+            .finish_output_capture(capture, &CallToolResult::success(vec![]))
+            .await
+            .unwrap();
+
+        let query = serde_json::json!({"sessionId": session.id, "path": path, "version": 1});
+        let history = send_custom(
+            conn.cx(),
+            "_gosling/unstable/session/outputs/history",
+            query.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            history["revisions"][0]["contributor"]["selectedModel"],
+            "selected"
+        );
+        let saved = send_custom(
+            conn.cx(),
+            "_gosling/unstable/session/outputs/revision",
+            query.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(saved["contentBase64"]
+            .as_str()
+            .unwrap()
+            .starts_with("IyBSZXBvcnQ"));
+        let mut restore = query.clone();
+        restore["expectedCurrentHash"] = saved["currentHash"].clone();
+        let restored = send_custom(
+            conn.cx(),
+            "_gosling/unstable/session/outputs/restore",
+            restore.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(restored["revision"]["version"], 2);
+        assert_eq!(restored["revision"]["restoredFrom"], 1);
+        assert!(send_custom(
+            conn.cx(),
+            "_gosling/unstable/session/outputs/restore",
+            restore
+        )
+        .await
+        .is_err());
+        let mut denied = query;
+        denied["path"] = serde_json::json!("/unregistered/report.md");
+        assert!(send_custom(
+            conn.cx(),
+            "_gosling/unstable/session/outputs/revision",
+            denied
+        )
+        .await
+        .is_err());
+    });
+}

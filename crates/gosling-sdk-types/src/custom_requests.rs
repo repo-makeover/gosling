@@ -825,6 +825,99 @@ pub struct ListSessionArtifactsResponse {
     pub total_count: usize,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputContributor {
+    pub agent: String,
+    pub session_id: String,
+    pub session_name: String,
+    pub source_id: String,
+    pub provider: Option<String>,
+    pub selected_model: Option<String>,
+    pub resolved_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputRevisionAction {
+    Created,
+    Modified,
+    Baseline,
+    Restored,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputAttributionKind {
+    Tool,
+    Observed,
+    Unknown,
+    User,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputRevisionDto {
+    pub version: i64,
+    pub recorded_at: String,
+    pub content_hash: String,
+    pub size_bytes: usize,
+    pub action: OutputRevisionAction,
+    pub attribution: OutputAttributionKind,
+    pub contributor: OutputContributor,
+    pub restored_from: Option<i64>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
+#[request(method = "_gosling/unstable/session/outputs/history", response = ListOutputRevisionsResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct ListOutputRevisionsRequest {
+    pub session_id: String,
+    pub path: String,
+    pub before_version: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, JsonRpcResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct ListOutputRevisionsResponse {
+    pub revisions: Vec<OutputRevisionDto>,
+    pub next_before_version: Option<i64>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
+#[request(method = "_gosling/unstable/session/outputs/revision", response = GetOutputRevisionResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct GetOutputRevisionRequest {
+    pub session_id: String,
+    pub path: String,
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, JsonRpcResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct GetOutputRevisionResponse {
+    pub revision: OutputRevisionDto,
+    pub content_base64: String,
+    pub current_hash: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
+#[request(method = "_gosling/unstable/session/outputs/restore", response = RestoreOutputRevisionResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreOutputRevisionRequest {
+    pub session_id: String,
+    pub path: String,
+    pub version: i64,
+    pub expected_current_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, JsonRpcResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreOutputRevisionResponse {
+    pub revision: OutputRevisionDto,
+}
+
 /// Search persisted messages within one session.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
 #[request(

@@ -5319,6 +5319,241 @@
         "created"
       ]
     },
+    "ListOutputRevisionsRequest_unstable": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "beforeVersion": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "limit": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "sessionId",
+        "path"
+      ],
+      "x-side": "agent",
+      "x-method": "_gosling/unstable/session/outputs/history"
+    },
+    "ListOutputRevisionsResponse_unstable": {
+      "type": "object",
+      "properties": {
+        "revisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OutputRevisionDto"
+          }
+        },
+        "nextBeforeVersion": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "revisions"
+      ],
+      "x-side": "agent",
+      "x-method": "_gosling/unstable/session/outputs/history"
+    },
+    "OutputRevisionDto": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "recordedAt": {
+          "type": "string"
+        },
+        "contentHash": {
+          "type": "string"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "action": {
+          "$ref": "#/$defs/OutputRevisionAction"
+        },
+        "attribution": {
+          "$ref": "#/$defs/OutputAttributionKind"
+        },
+        "contributor": {
+          "$ref": "#/$defs/OutputContributor"
+        },
+        "restoredFrom": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "recordedAt",
+        "contentHash",
+        "sizeBytes",
+        "action",
+        "attribution",
+        "contributor"
+      ]
+    },
+    "OutputRevisionAction": {
+      "type": "string",
+      "enum": [
+        "created",
+        "modified",
+        "baseline",
+        "restored"
+      ]
+    },
+    "OutputAttributionKind": {
+      "type": "string",
+      "enum": [
+        "tool",
+        "observed",
+        "unknown",
+        "user"
+      ]
+    },
+    "OutputContributor": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "sessionName": {
+          "type": "string"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selectedModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "agent",
+        "sessionId",
+        "sessionName",
+        "sourceId"
+      ]
+    },
+    "GetOutputRevisionRequest_unstable": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sessionId",
+        "path",
+        "version"
+      ],
+      "x-side": "agent",
+      "x-method": "_gosling/unstable/session/outputs/revision"
+    },
+    "GetOutputRevisionResponse_unstable": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/OutputRevisionDto"
+        },
+        "contentBase64": {
+          "type": "string"
+        },
+        "currentHash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "revision",
+        "contentBase64"
+      ],
+      "x-side": "agent",
+      "x-method": "_gosling/unstable/session/outputs/revision"
+    },
+    "RestoreOutputRevisionRequest_unstable": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "expectedCurrentHash": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "path",
+        "version",
+        "expectedCurrentHash"
+      ],
+      "x-side": "agent",
+      "x-method": "_gosling/unstable/session/outputs/restore"
+    },
+    "RestoreOutputRevisionResponse_unstable": {
+      "type": "object",
+      "properties": {
+        "revision": {
+          "$ref": "#/$defs/OutputRevisionDto"
+        }
+      },
+      "required": [
+        "revision"
+      ],
+      "x-side": "agent",
+      "x-method": "_gosling/unstable/session/outputs/restore"
+    },
     "GetSessionSummaryRequest_unstable": {
       "type": "object",
       "properties": {
@@ -8068,6 +8303,33 @@
                 {
                   "allOf": [
                     {
+                      "$ref": "#/$defs/ListOutputRevisionsRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _gosling/unstable/session/outputs/history",
+                  "title": "ListOutputRevisionsRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/GetOutputRevisionRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _gosling/unstable/session/outputs/revision",
+                  "title": "GetOutputRevisionRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/RestoreOutputRevisionRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _gosling/unstable/session/outputs/restore",
+                  "title": "RestoreOutputRevisionRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
                       "$ref": "#/$defs/GetSessionSummaryRequest_unstable"
                     }
                   ],
@@ -8873,6 +9135,30 @@
                         }
                       ],
                       "title": "SearchSessionMessagesResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ListOutputRevisionsResponse_unstable"
+                        }
+                      ],
+                      "title": "ListOutputRevisionsResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/GetOutputRevisionResponse_unstable"
+                        }
+                      ],
+                      "title": "GetOutputRevisionResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/RestoreOutputRevisionResponse_unstable"
+                        }
+                      ],
+                      "title": "RestoreOutputRevisionResponse_unstable"
                     },
                     {
                       "allOf": [

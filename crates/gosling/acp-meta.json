@@ -401,6 +401,21 @@
       "responseType": "SearchSessionMessagesResponse_unstable"
     },
     {
+      "method": "_gosling/unstable/session/outputs/history",
+      "requestType": "ListOutputRevisionsRequest_unstable",
+      "responseType": "ListOutputRevisionsResponse_unstable"
+    },
+    {
+      "method": "_gosling/unstable/session/outputs/revision",
+      "requestType": "GetOutputRevisionRequest_unstable",
+      "responseType": "GetOutputRevisionResponse_unstable"
+    },
+    {
+      "method": "_gosling/unstable/session/outputs/restore",
+      "requestType": "RestoreOutputRevisionRequest_unstable",
+      "responseType": "RestoreOutputRevisionResponse_unstable"
+    },
+    {
       "method": "_gosling/unstable/session/summary/get",
       "requestType": "GetSessionSummaryRequest_unstable",
       "responseType": "GetSessionSummaryResponse_unstable"

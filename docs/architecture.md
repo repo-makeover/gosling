@@ -146,7 +146,15 @@ links, and returns per-file outcomes without falling back to permanent unlink. D
 successful previews and persists deleted Outputs versions as session presentation state; backend
 artifact provenance is retained. The Research Library list refreshes from its bounded disk scan.
 
+Output contribution history is a separate core-owned service (ADR-0018, schema v32), not part of
+inventory listing. Successful hosted mutating tools capture bounded document changes and record
+message-level agent/model identity with append-only file snapshots. Desktop uses typed ACP requests
+for history, comparison, export, and hash-checked restore. Markdown products in configured output
+directories carry a managed history footer. Saved revisions persist independently of chat deletion;
+read-only references do not acquire authorship and external edits are not continuously watched.
+
 ## Error taxonomy
+
 
 | Class       | Examples                                                         | ACP behavior                                             | UI behavior                               |
 | ----------- | ---------------------------------------------------------------- | -------------------------------------------------------- | ----------------------------------------- |

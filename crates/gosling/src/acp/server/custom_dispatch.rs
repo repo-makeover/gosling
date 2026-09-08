@@ -658,6 +658,39 @@ impl GoslingAcpAgent {
         self.on_search_session_messages(req).await
     }
 
+    #[custom_method(ListOutputRevisionsRequest)]
+    async fn dispatch_list_output_revisions(
+        &self,
+        req: ListOutputRevisionsRequest,
+    ) -> Result<ListOutputRevisionsResponse, agent_client_protocol::Error> {
+        self.session_manager
+            .list_output_revisions(req)
+            .await
+            .map_err(|error| agent_client_protocol::Error::invalid_params().data(error.to_string()))
+    }
+
+    #[custom_method(GetOutputRevisionRequest)]
+    async fn dispatch_get_output_revision(
+        &self,
+        req: GetOutputRevisionRequest,
+    ) -> Result<GetOutputRevisionResponse, agent_client_protocol::Error> {
+        self.session_manager
+            .get_output_revision(req)
+            .await
+            .map_err(|error| agent_client_protocol::Error::invalid_params().data(error.to_string()))
+    }
+
+    #[custom_method(RestoreOutputRevisionRequest)]
+    async fn dispatch_restore_output_revision(
+        &self,
+        req: RestoreOutputRevisionRequest,
+    ) -> Result<RestoreOutputRevisionResponse, agent_client_protocol::Error> {
+        self.session_manager
+            .restore_output_revision(req)
+            .await
+            .map_err(|error| agent_client_protocol::Error::invalid_params().data(error.to_string()))
+    }
+
     #[custom_method(GetSessionSummaryRequest)]
     async fn dispatch_get_session_summary(
         &self,

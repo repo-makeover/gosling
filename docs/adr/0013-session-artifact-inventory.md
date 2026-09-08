@@ -44,8 +44,9 @@ files with a configured extension stay named, while other entries are omitted fr
 and count. Common code/config extensions receive a code preview kind when the user adds them to the
 display list.
 Files are never created, copied, moved, opened, or read merely because a record exists. Files created
-by arbitrary shell commands and never referenced remain undiscovered; a future bounded observer would
-require a separate decision.
+by arbitrary shell commands and never referenced were initially undiscovered. ADR-0018 adds a
+separate bounded observer around hosted mutating tools; inventory listing and legacy backfill remain
+metadata-only.
 
 ## Explicit file deletion (2026-09-08)
 
@@ -89,3 +90,13 @@ timezone tooltip. Metadata refreshes on list mount, inventory/file-version chang
 focus, including a refresh after native artifact capabilities finish applying. Requests are batched;
 late responses from earlier list versions or refreshes are ignored.
 No timestamp is persisted into artifact provenance and no file-content read or new grant occurs.
+
+## Explicit contents copy (2026-09-08)
+
+The preview toolbar offers separate Copy contents and Copy path actions. File-content copying is
+an explicit, per-window authorized main-process operation through the same artifact guard. It reads
+the complete UTF-8 file, independently of preview truncation, and writes directly to the native
+clipboard without sending another full copy through renderer IPC. Reads are bounded to 20 MiB;
+oversized files, non-text bytes, changed files, and access failures leave the clipboard untouched.
+Text artifacts supplied inline use the existing text clipboard bridge. The action is disabled for
+image, PDF, and unsupported document previews, and reports completion or failure.

@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { dialog, shell } from 'electron';
+import { clipboard, dialog, shell } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerFileIpcHandlers } from './fileIpc';
 import {
@@ -117,6 +117,58 @@ async function createMainFileIpc() {
 }
 
 describe('live main artifact authorization', () => {
+  it('copies complete UTF-8 contents beyond the preview limit, including relative paths', async () => {
+    const { invoke, publish, reportPath, outputRoot } = await createMainFileIpc();
+    const contents = '# Report\n\n' + 'é — 😀\n'.repeat(220_000) + '\nFinal paragraph.';
+    await fs.writeFile(reportPath, contents);
+    await publish([reportPath]);
+    expect(await invoke('read-artifact-file', 7, reportPath)).toMatchObject({ truncated: true });
+    await invoke('copy-artifact-contents', 7, path.basename(reportPath), outputRoot);
+    expect(clipboard.writeText).toHaveBeenCalledWith(contents);
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled();
+  });
+
+  it('blocks unauthorized copy contents requests without changing the clipboard', async () => {
+    const { invoke, publish, reportPath, outputRoot, launchRoot } = await createMainFileIpc();
+    const neighbor = path.join(outputRoot, 'private.md');
+    await fs.writeFile(neighbor, 'Private');
+    const link = path.join(launchRoot, 'escape.md');
+    await fs.symlink(neighbor, link);
+    await publish([reportPath]);
+    for (const [windowId, file] of [
+      [8, reportPath],
+      [7, neighbor],
+      [7, link],
+      [7, launchRoot],
+      [7, path.join(launchRoot, 'missing.md')],
+    ] as const) {
+      await expect(invoke('copy-artifact-contents', windowId, file)).rejects.toThrow();
+    }
+    expect(clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized and non-text copy contents without copying a partial file', async () => {
+    const { invoke, reportPath, launchRoot } = await createMainFileIpc();
+    const oversized = path.join(launchRoot, 'large.txt');
+    await fs.copyFile(reportPath, oversized);
+    await fs.truncate(oversized, 20 * 1024 * 1024 + 1);
+    await expect(invoke('copy-artifact-contents', 7, oversized)).rejects.toThrow('20 MiB');
+    const binary = path.join(launchRoot, 'binary.txt');
+    await fs.writeFile(binary, new Uint8Array([65, 0, 66]));
+    await expect(invoke('copy-artifact-contents', 7, binary)).rejects.toThrow('UTF-8');
+    await fs.writeFile(binary, new Uint8Array([0xff, 0xfe]));
+    await expect(invoke('copy-artifact-contents', 7, binary)).rejects.toThrow('UTF-8');
+    expect(clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it('copies an empty text file successfully', async () => {
+    const { invoke, publish, reportPath } = await createMainFileIpc();
+    await fs.writeFile(reportPath, '');
+    await publish([reportPath]);
+    await invoke('copy-artifact-contents', 7, reportPath);
+    expect(clipboard.writeText).toHaveBeenCalledWith('');
+  });
+
   it('returns filesystem creation and modification times and observes later file changes', async () => {
     const { invoke, publish, reportPath } = await createMainFileIpc();
     await publish([reportPath]);

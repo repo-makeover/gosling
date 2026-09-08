@@ -166,6 +166,7 @@ impl SessionStorage {
         Self::create_tool_operations_schema(&mut tx).await?;
 
         Self::create_session_artifacts_schema(&mut tx).await?;
+        Self::create_output_revisions_schema(&mut tx).await?;
 
         Self::create_session_library_schema(&mut tx).await?;
 
