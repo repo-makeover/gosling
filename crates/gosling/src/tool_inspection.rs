@@ -56,6 +56,8 @@ pub trait ToolInspector: Send + Sync {
         true
     }
 
+    /// Whether Auto mode may treat this inspector's approval requests as advisory.
+    /// Workspace and security gates override this to keep their prompts mandatory.
     fn auto_downgrades_require_approval(&self) -> bool {
         true
     }
@@ -82,7 +84,8 @@ impl ToolInspectionManager {
         self.inspectors.push(inspector);
     }
 
-    /// Run all inspectors on the tool requests
+    /// Runs enabled inspectors in order. Failures become mandatory approval results
+    /// for every request in the batch, including in Auto mode.
     pub async fn inspect_tools(
         &self,
         session_id: &str,
@@ -113,9 +116,8 @@ impl ToolInspectionManager {
                         result_count = results.len(),
                         "Tool inspector completed"
                     );
-                    // Auto mode is fully autonomous: advisory findings are
-                    // logged but never escalate to a user prompt. Hard denies
-                    // still apply. (Inspector *errors* below still fail closed.)
+                    // Only opted-in advisory prompts are downgraded. Hard denials,
+                    // mandatory prompts and inspector failures retain their restrictions.
                     if gosling_mode == GoslingMode::Auto
                         && inspector.auto_downgrades_require_approval()
                     {
@@ -140,12 +142,8 @@ impl ToolInspectionManager {
                         error = %e,
                         "Tool inspector failed; failing closed by requiring approval for this batch"
                     );
-                    // Fail closed. A safety inspector that cannot run must not
-                    // silently drop its verdict: in Auto mode the permission
-                    // baseline is Allow, so a lost restriction would let an
-                    // unjudged tool execute. Synthesize a RequireApproval for
-                    // every request in the batch so it escalates to human
-                    // approval instead of running ungated.
+                    // Auto's permission baseline may allow the entire batch. Emit
+                    // a restriction for each request so failure cannot erase a gate.
                     for request in tool_requests {
                         all_results.push(InspectionResult {
                             tool_request_id: request.id.clone(),
@@ -169,21 +167,24 @@ impl ToolInspectionManager {
 
     /// Get list of registered inspector names
     pub fn inspector_names(&self) -> Vec<&'static str> {
-        self.inspectors.iter().map(|i| i.name()).collect()
+        self.inspectors
+            .iter()
+            .map(|inspector| inspector.name())
+            .collect()
     }
 
     fn get_permission_inspector(&self) -> Option<&PermissionInspector> {
         self.inspectors
             .iter()
-            .find(|i| i.name() == "permission")
-            .and_then(|i| i.as_any().downcast_ref::<PermissionInspector>())
+            .find(|inspector| inspector.name() == "permission")
+            .and_then(|inspector| inspector.as_any().downcast_ref::<PermissionInspector>())
     }
 
     fn get_egress_inspector(&self) -> Option<&EgressInspector> {
         self.inspectors
             .iter()
-            .find(|i| i.name() == "egress")
-            .and_then(|i| i.as_any().downcast_ref::<EgressInspector>())
+            .find(|inspector| inspector.name() == "egress")
+            .and_then(|inspector| inspector.as_any().downcast_ref::<EgressInspector>())
     }
 
     pub fn apply_tool_annotations(&self, tools: &[rmcp::model::Tool]) {
@@ -192,6 +193,7 @@ impl ToolInspectionManager {
         }
     }
 
+    /// Persists a tool decision; callers must handle failure before dispatching the tool.
     pub async fn update_permission_manager(
         &self,
         tool_name: &str,
@@ -204,6 +206,7 @@ impl ToolInspectionManager {
             .map_err(anyhow::Error::msg)
     }
 
+    /// Persists a domain decision without granting authority to the whole tool.
     pub async fn update_egress_domain_permission(
         &self,
         domain: &str,
@@ -233,8 +236,9 @@ impl Default for ToolInspectionManager {
     }
 }
 
-/// Apply inspection results to permission check results
-/// This is the generic permission-mixing logic that works for all inspector types
+/// Tightens the baseline: deny outranks approval, and allow cannot undo either.
+/// Inspection results are applied in order; an inspector can move a request
+/// only toward a more restrictive outcome.
 pub fn apply_inspection_results_to_permissions(
     mut permission_result: PermissionCheckResult,
     inspection_results: &[InspectionResult],
@@ -243,25 +247,22 @@ pub fn apply_inspection_results_to_permissions(
         return permission_result;
     }
 
-    // Create a map of tool requests by ID for easy lookup
-    let mut all_requests: HashMap<String, ToolRequest> = HashMap::new();
+    let mut requests_by_id: HashMap<String, ToolRequest> = HashMap::new();
 
-    // Collect all tool requests
     for req in &permission_result.approved {
-        all_requests.insert(req.id.clone(), req.clone());
+        requests_by_id.insert(req.id.clone(), req.clone());
     }
     for req in &permission_result.needs_approval {
-        all_requests.insert(req.id.clone(), req.clone());
+        requests_by_id.insert(req.id.clone(), req.clone());
     }
     for req in &permission_result.denied {
-        all_requests.insert(req.id.clone(), req.clone());
+        requests_by_id.insert(req.id.clone(), req.clone());
     }
 
-    // Process inspection results
     for result in inspection_results {
         let request_id = &result.tool_request_id;
 
-        let action_str = match &result.action {
+        let security_action = match &result.action {
             InspectionAction::Deny => "BLOCK",
             InspectionAction::RequireApproval(_) => "ALERT",
             InspectionAction::Allow => "ALLOW",
@@ -269,7 +270,7 @@ pub fn apply_inspection_results_to_permissions(
 
         tracing::info!(
             security.event_type = "inspection_result",
-            security.action = action_str,
+            security.action = security_action,
             security.confidence = result.confidence,
             security.finding_id = ?result.finding_id,
             tool.request_id = %request_id,
@@ -280,7 +281,6 @@ pub fn apply_inspection_results_to_permissions(
 
         match result.action {
             InspectionAction::Deny => {
-                // Remove from approved and needs_approval, add to denied
                 permission_result
                     .approved
                     .retain(|req| req.id != *request_id);
@@ -288,7 +288,7 @@ pub fn apply_inspection_results_to_permissions(
                     .needs_approval
                     .retain(|req| req.id != *request_id);
 
-                if let Some(request) = all_requests.get(request_id) {
+                if let Some(request) = requests_by_id.get(request_id) {
                     if !permission_result
                         .denied
                         .iter()
@@ -299,7 +299,6 @@ pub fn apply_inspection_results_to_permissions(
                 }
             }
             InspectionAction::RequireApproval(_) => {
-                // Remove from approved, add to needs_approval if not already there
                 permission_result
                     .approved
                     .retain(|req| req.id != *request_id);
@@ -312,7 +311,7 @@ pub fn apply_inspection_results_to_permissions(
                     continue;
                 }
 
-                if let Some(request) = all_requests.get(request_id) {
+                if let Some(request) = requests_by_id.get(request_id) {
                     if !permission_result
                         .needs_approval
                         .iter()
@@ -323,8 +322,7 @@ pub fn apply_inspection_results_to_permissions(
                 }
             }
             InspectionAction::Allow => {
-                // This inspector allows it, but don't override other inspectors' decisions
-                // If it's already denied or needs approval, leave it that way
+                // An allow result is not authority to reverse another inspector's restriction.
             }
         }
     }

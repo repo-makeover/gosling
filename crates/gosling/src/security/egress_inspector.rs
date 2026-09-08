@@ -10,6 +10,7 @@ use crate::config::{GoslingMode, PermissionManager};
 use crate::conversation::message::{Message, ToolRequest};
 use crate::tool_inspection::{InspectionAction, InspectionResult, ToolInspector};
 
+/// Checks each network-capable request against stored domain decisions and transfer direction.
 pub struct EgressInspector {
     pub permission_manager: Arc<PermissionManager>,
 }
@@ -427,60 +428,60 @@ impl ToolInspector for EgressInspector {
 
         for tool_request in tool_requests {
             let tool_call = match &tool_request.tool_call {
-                Ok(tc) => tc,
+                Ok(tool_call) => tool_call,
                 Err(_) => continue,
             };
 
-            let name = tool_call.name.as_ref();
-            let is_web = is_web_tool(name);
-            if !is_shell_tool(name) && !is_web {
+            let tool_name = tool_call.name.as_ref();
+            let is_web_request = is_web_tool(tool_name);
+            if !is_shell_tool(tool_name) && !is_web_request {
                 continue;
             }
 
-            let text = match extract_text_for_inspection(tool_call, is_web) {
-                Some(t) => t,
+            let inspection_text = match extract_text_for_inspection(tool_call, is_web_request) {
+                Some(text) => text,
                 None => continue,
             };
 
             // Inspection decisions belong to a request, even when another request
             // in the same batch mentions the identical destination.
             let mut seen_destinations = HashSet::new();
-            let destinations: Vec<_> = extract_destinations(&text)
+            let destinations: Vec<_> = extract_destinations(&inspection_text)
                 .into_iter()
-                .filter(|d| seen_destinations.insert(d.destination.clone()))
+                .filter(|destination| seen_destinations.insert(destination.destination.clone()))
                 .collect();
 
             if destinations.is_empty() {
                 continue;
             }
 
-            if !is_web && !mentions_network_client(&text) {
+            if !is_web_request && !mentions_network_client(&inspection_text) {
                 tracing::info!(
                     security.event_type = "egress",
                     security.action = "ALLOW",
                     network.destinations = destinations
                         .iter()
-                        .map(|d| d.destination.as_str())
+                        .map(|destination| destination.destination.as_str())
                         .collect::<Vec<_>>()
                         .join(", "),
-                    tool.name = name,
+                    tool.name = tool_name,
                     "destination literals without a network client are not egress"
                 );
                 continue;
             }
 
-            let direction = detect_direction(&text);
+            let direction = detect_direction(&inspection_text);
 
-            for dest in &destinations {
+            for destination in &destinations {
                 tracing::info!(
                     security.event_type = "egress",
                     security.action = "LOG",
                     security.threat_type = "data_exfiltration",
-                    network.destination = dest.destination.as_str(),
-                    network.domain = dest.domain.as_str(),
-                    network.egress_kind = dest.kind.as_str(),
+                    network.destination = destination.destination.as_str(),
+                    network.domain = destination.domain.as_str(),
+                    network.egress_kind = destination.kind.as_str(),
                     network.direction = direction.as_str(),
-                    tool.name = name,
+                    tool.name = tool_name,
                     "network egress detected"
                 );
             }
@@ -489,32 +490,35 @@ impl ToolInspector for EgressInspector {
                 "Egress destinations detected: {}",
                 destinations
                     .iter()
-                    .map(|d| d.destination.as_str())
+                    .map(|destination| destination.destination.as_str())
                     .collect::<Vec<_>>()
                     .join(", ")
             );
-            // A destination is pre-cleared if it is loopback or the user has
-            // explicitly always-allowed its domain. Only destinations that are
-            // neither still need the direction-based approval gate below.
+            // Read each domain once for this request; later requests reload policy
+            // so they can observe a grant or revocation made between calls.
             let mut domain_permissions = std::collections::HashMap::new();
-            for dest in &destinations {
+            for destination in &destinations {
                 domain_permissions
-                    .entry(dest.domain.as_str())
+                    .entry(destination.domain.as_str())
                     .or_insert_with(|| {
                         self.permission_manager
-                            .get_egress_domain_permission(&dest.domain)
+                            .get_egress_domain_permission(&destination.domain)
                     });
             }
             let is_pre_cleared = |domain: &str| {
                 is_loopback_domain(domain)
                     || domain_permissions.get(domain) == Some(&Some(PermissionLevel::AlwaysAllow))
             };
-            let action = if domain_permissions
+            let has_denied_domain = domain_permissions
                 .values()
-                .any(|level| *level == Some(PermissionLevel::NeverAllow))
-            {
+                .any(|level| *level == Some(PermissionLevel::NeverAllow));
+            // A saved denial wins even for loopback or an otherwise inbound transfer.
+            let action = if has_denied_domain {
                 InspectionAction::Deny
-            } else if destinations.iter().all(|dest| is_pre_cleared(&dest.domain)) {
+            } else if destinations
+                .iter()
+                .all(|destination| is_pre_cleared(&destination.domain))
+            {
                 InspectionAction::Allow
             } else {
                 match direction {
@@ -524,18 +528,16 @@ impl ToolInspector for EgressInspector {
                     }
                 }
             };
-            // The flagged, not-yet-cleared domains ride along as structured
-            // metadata so a later "always allow this domain" response can
-            // persist the grant without re-parsing `reason`.
+            // Approval responses consume domain metadata, not the human-readable reason.
             let metadata = if matches!(action, InspectionAction::RequireApproval(_)) {
-                let mut domains: Vec<&str> = destinations
+                let mut flagged_domains: Vec<&str> = destinations
                     .iter()
-                    .filter(|dest| !is_pre_cleared(&dest.domain))
-                    .map(|dest| dest.domain.as_str())
+                    .filter(|destination| !is_pre_cleared(&destination.domain))
+                    .map(|destination| destination.domain.as_str())
                     .collect();
-                domains.sort_unstable();
-                domains.dedup();
-                Some(serde_json::json!({ "domains": domains }))
+                flagged_domains.sort_unstable();
+                flagged_domains.dedup();
+                Some(serde_json::json!({ "domains": flagged_domains }))
             } else {
                 None
             };

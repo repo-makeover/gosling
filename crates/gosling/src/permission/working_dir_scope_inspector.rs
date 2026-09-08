@@ -418,6 +418,9 @@ fn collect_referenced_paths(
     }
 }
 
+// Nested `sh -c` calls and shell-received heredocs share this analysis limit.
+const MAX_SHELL_ANALYSIS_DEPTH: usize = 16;
+
 struct ShellSegment {
     words: Vec<String>,
     read_only: bool,
@@ -437,7 +440,7 @@ fn analyze_shell_at_depth(command: &str, depth: usize) -> ShellAnalysis {
         segments: Vec::new(),
         complete: false,
     };
-    if depth >= 16 {
+    if depth >= MAX_SHELL_ANALYSIS_DEPTH {
         return analysis;
     }
     let mut parser = tree_sitter::Parser::new();
@@ -458,23 +461,23 @@ fn analyze_shell_at_depth(command: &str, depth: usize) -> ShellAnalysis {
         tree
     };
     analysis.complete = !tree.root_node().has_error();
-    let mut pending = vec![tree.root_node()];
-    while let Some(node) = pending.pop() {
+    let mut pending_nodes = vec![tree.root_node()];
+    while let Some(node) = pending_nodes.pop() {
         match node.kind() {
             "command" => {
                 let words = parsed_command_words(node, command);
-                let command_words = command_words(&words);
-                if let Some(executable) = command_words.first() {
+                let executable_words = unwrap_command_words(&words);
+                if let Some(executable) = executable_words.first() {
                     let executable = Path::new(executable)
                         .file_name()
                         .and_then(|name| name.to_str())
                         .unwrap_or_default();
                     if matches!(executable, "sh" | "bash" | "zsh" | "dash" | "ksh") {
-                        if let Some(index) = command_words
+                        if let Some(command_flag_index) = executable_words
                             .iter()
                             .position(|word| word.starts_with('-') && word.contains('c'))
                         {
-                            if let Some(script) = command_words.get(index + 1) {
+                            if let Some(script) = executable_words.get(command_flag_index + 1) {
                                 let nested = analyze_shell_at_depth(script, depth + 1);
                                 analysis.complete &= nested.complete;
                                 analysis.segments.extend(nested.segments);
@@ -486,7 +489,7 @@ fn analyze_shell_at_depth(command: &str, depth: usize) -> ShellAnalysis {
                     // env -S has its own expansion grammar; never silently treat it
                     // as a read-only environment listing.
                     if executable == "env"
-                        && command_words
+                        && executable_words
                             .iter()
                             .any(|word| word == "-S" || word.starts_with("--split-string"))
                     {
@@ -503,6 +506,7 @@ fn analyze_shell_at_depth(command: &str, depth: usize) -> ShellAnalysis {
                         let read_only = !(0..words.len())
                             .any(|index| redirects_output_to_file(&words, index))
                             && !raw.contains("<>");
+                        // Path collection skips the executable slot; redirects have none.
                         words.insert(0, String::new());
                         analysis.segments.push(ShellSegment { words, read_only });
                     }
@@ -534,7 +538,8 @@ fn analyze_shell_at_depth(command: &str, depth: usize) -> ShellAnalysis {
         }
         let mut cursor = node.walk();
         let children: Vec<_> = node.named_children(&mut cursor).collect();
-        pending.extend(children.into_iter().rev());
+        // The stack is LIFO; reverse children to preserve source order.
+        pending_nodes.extend(children.into_iter().rev());
     }
     analysis
 }
@@ -546,39 +551,46 @@ fn splice_shell_continuations(command: &str, root: tree_sitter::Node<'_>) -> Opt
     // Bash removes continuations before identifying word/comment boundaries.
     // The grammar treats a hash after a continuation as a fresh comment, so
     // splice executable source while retaining literal strings and heredoc data.
-    let mut protected = Vec::new();
-    let mut pending = vec![root];
-    while let Some(node) = pending.pop() {
+    let mut literal_ranges = Vec::new();
+    let mut pending_nodes = vec![root];
+    while let Some(node) = pending_nodes.pop() {
         if matches!(node.kind(), "raw_string" | "heredoc_body" | "comment") {
-            protected.push(node.byte_range());
+            literal_ranges.push(node.byte_range());
         } else {
             let mut cursor = node.walk();
-            pending.extend(node.named_children(&mut cursor));
+            pending_nodes.extend(node.named_children(&mut cursor));
         }
     }
-    protected.sort_by_key(|range| range.start);
-    let bytes = command.as_bytes();
-    let mut output = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    let mut ranges = protected.iter().peekable();
-    while index < bytes.len() {
-        while ranges.peek().is_some_and(|range| range.end <= index) {
-            ranges.next();
+    literal_ranges.sort_by_key(|range| range.start);
+    let source_bytes = command.as_bytes();
+    let mut spliced_bytes = Vec::with_capacity(source_bytes.len());
+    let mut byte_index = 0;
+    let mut remaining_literal_ranges = literal_ranges.iter().peekable();
+    while byte_index < source_bytes.len() {
+        while remaining_literal_ranges
+            .peek()
+            .is_some_and(|range| range.end <= byte_index)
+        {
+            remaining_literal_ranges.next();
         }
-        if ranges.peek().is_some_and(|range| range.contains(&index)) {
-            output.push(bytes[index]);
-            index += 1;
-        } else if bytes[index] == b'\\' && index + 1 < bytes.len() {
-            if bytes[index + 1] != b'\n' {
-                output.extend_from_slice(&bytes[index..index + 2]);
+        if remaining_literal_ranges
+            .peek()
+            .is_some_and(|range| range.contains(&byte_index))
+        {
+            spliced_bytes.push(source_bytes[byte_index]);
+            byte_index += 1;
+        } else if source_bytes[byte_index] == b'\\' && byte_index + 1 < source_bytes.len() {
+            if source_bytes[byte_index + 1] != b'\n' {
+                spliced_bytes.extend_from_slice(&source_bytes[byte_index..byte_index + 2]);
             }
-            index += 2;
+            byte_index += 2;
         } else {
-            output.push(bytes[index]);
-            index += 1;
+            spliced_bytes.push(source_bytes[byte_index]);
+            byte_index += 1;
         }
     }
-    (output != bytes).then(|| String::from_utf8(output).expect("Removing ASCII preserves UTF-8"))
+    (spliced_bytes != source_bytes)
+        .then(|| String::from_utf8(spliced_bytes).expect("Removing ASCII preserves UTF-8"))
 }
 
 fn parsed_command_words(node: tree_sitter::Node<'_>, command: &str) -> Vec<String> {
@@ -601,7 +613,7 @@ fn is_shell_receiver(mut node: tree_sitter::Node<'_>, command: &str) -> bool {
         node = last;
     }
     let words = parsed_command_words(node, command);
-    command_words(&words).first().is_some_and(|name| {
+    unwrap_command_words(&words).first().is_some_and(|name| {
         matches!(
             Path::new(name).file_name().and_then(|name| name.to_str()),
             Some("sh" | "bash" | "zsh" | "dash" | "ksh")
@@ -618,7 +630,8 @@ fn shell_word(node: tree_sitter::Node<'_>, command: &str) -> String {
 }
 
 /// Unwrap commands that forward their arguments to another executable.
-fn command_words(segment: &[String]) -> &[String] {
+/// Unsupported `env` options preserve the original words for conservative classification.
+fn unwrap_command_words(segment: &[String]) -> &[String] {
     let mut words = segment;
     while let Some((first, rest)) = words.split_first() {
         match Path::new(first)
@@ -827,7 +840,7 @@ fn redirects_output_to_file(segment: &[String], index: usize) -> bool {
 }
 
 fn shell_segment_is_read_only(segment: &[String]) -> bool {
-    let words = command_words(segment);
+    let words = unwrap_command_words(segment);
     let Some(executable) = words.first() else {
         return true;
     };

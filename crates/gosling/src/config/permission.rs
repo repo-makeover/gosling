@@ -14,36 +14,39 @@ const PERMISSION_FILE: &str = "permission.yaml";
 static PERMISSION_MANAGERS: LazyLock<Mutex<HashMap<PathBuf, Weak<PermissionManager>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Enum representing the possible permission levels for a tool.
+/// A stored decision within one policy category; other inspectors may still restrict a call.
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionLevel {
-    AlwaysAllow, // Tool can always be used without prompt
-    AskBefore,   // Tool requires permission to be granted before use
-    NeverAllow,  // Tool is never allowed to be used
+    AlwaysAllow,
+    AskBefore,
+    NeverAllow,
 }
 
-/// Struct representing the configuration of permissions, categorized by level.
+/// The YAML representation of one category's principals, grouped by decision.
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 pub struct PermissionConfig {
-    pub always_allow: Vec<String>, // List of tools that are always allowed
-    pub ask_before: Vec<String>,   // List of tools that require user consent
-    pub never_allow: Vec<String>,  // List of tools that are never allowed
+    pub always_allow: Vec<String>,
+    pub ask_before: Vec<String>,
+    pub never_allow: Vec<String>,
 }
 
-/// PermissionManager manages permission configurations for various tools.
+/// Reads current on-disk policy and serializes permission updates across processes.
+///
+/// Lookups reload the file so existing handles observe revocations. An unreadable
+/// policy returns `NeverAllow`; failed writes leave the stored policy unchanged.
 #[derive(Debug)]
 pub struct PermissionManager {
     config_path: PathBuf,
 }
 
-// Constants representing specific permission categories
 const USER_PERMISSION: &str = "user";
 const SMART_APPROVE_PERMISSION: &str = "smart_approve";
 const EGRESS_DOMAIN_PERMISSION: &str = "egress_domain";
 const ACP_PROVIDER_PERMISSION: &str = "acp_provider";
 
 impl PermissionManager {
+    /// Validates an existing policy at startup, panicking if it cannot be read or parsed.
     pub fn new(config_dir: PathBuf) -> Self {
         let permission_path = config_dir.join(PERMISSION_FILE);
         let _: HashMap<String, PermissionConfig> = if permission_path.exists() {
@@ -61,9 +64,7 @@ impl PermissionManager {
                 );
             })
         } else {
-            // Consolidate directory creation for re-use in global singleton or ACP.
-            // A failure (read-only config dir) only means later persists will
-            // fail too, which is logged there — not worth crashing the process.
+            // Directory creation failure is deferred to the normal read/write error paths.
             if let Err(e) = fs::create_dir_all(&config_dir) {
                 tracing::error!("Failed to create config directory {config_dir:?}: {e}");
             }
@@ -109,7 +110,8 @@ impl PermissionManager {
         Ok(file)
     }
 
-    fn read_file(&self) -> anyhow::Result<HashMap<String, PermissionConfig>> {
+    // Callers hold the sidecar lock, either for a snapshot or the full write transaction.
+    fn read_permissions_file_unlocked(&self) -> anyhow::Result<HashMap<String, PermissionConfig>> {
         match fs::read_to_string(&self.config_path) {
             Ok(contents) => Ok(serde_yaml::from_str(&contents)?),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
@@ -117,9 +119,9 @@ impl PermissionManager {
         }
     }
 
-    fn read_map(&self) -> anyhow::Result<HashMap<String, PermissionConfig>> {
+    fn read_permissions_snapshot(&self) -> anyhow::Result<HashMap<String, PermissionConfig>> {
         let _lock = self.acquire_lock(false)?;
-        self.read_file()
+        self.read_permissions_file_unlocked()
     }
 
     fn mutate_permissions(
@@ -127,9 +129,10 @@ impl PermissionManager {
         mutate: impl FnOnce(&mut HashMap<String, PermissionConfig>),
     ) -> anyhow::Result<()> {
         let _lock = self.acquire_lock(true)?;
-        let mut map = self.read_file()?;
-        mutate(&mut map);
-        let yaml = serde_yaml::to_string(&map)?;
+        // Reload under the write lock so a stale handle cannot overwrite another writer.
+        let mut permissions = self.read_permissions_file_unlocked()?;
+        mutate(&mut permissions);
+        let yaml = serde_yaml::to_string(&permissions)?;
         crate::config::base::write_file_atomic(&self.config_path, &yaml)?;
         Ok(())
     }
@@ -169,9 +172,9 @@ impl PermissionManager {
         .map_err(|error| error.to_string())
     }
 
-    /// Returns a list of all the names (keys) in the permission map.
+    /// Returns policy category names, or an empty list after logging a read failure.
     pub fn get_permission_names(&self) -> Vec<String> {
-        match self.read_map() {
+        match self.read_permissions_snapshot() {
             Ok(map) => map.keys().cloned().collect(),
             Err(error) => {
                 tracing::error!(%error, path = ?self.config_path, "Could not read permission names");
@@ -180,21 +183,19 @@ impl PermissionManager {
         }
     }
 
-    /// Retrieves the user permission level for a specific tool.
     pub fn get_user_permission(&self, principal_name: &str) -> Option<PermissionLevel> {
         self.get_permission(USER_PERMISSION, principal_name)
     }
 
-    /// Retrieves the smart approve permission level for a specific tool.
     pub fn get_smart_approve_permission(&self, principal_name: &str) -> Option<PermissionLevel> {
         self.get_permission(SMART_APPROVE_PERMISSION, principal_name)
     }
 
-    /// Retrieves the always-allow/never-allow status for a specific egress domain.
     pub fn get_egress_domain_permission(&self, domain: &str) -> Option<PermissionLevel> {
         self.get_permission(EGRESS_DOMAIN_PERMISSION, domain)
     }
 
+    /// Looks up a provider/tool pair without sharing authority with another provider.
     pub fn get_acp_provider_permission(
         &self,
         provider_name: &str,
@@ -206,7 +207,6 @@ impl PermissionManager {
         )
     }
 
-    /// Retrieves the config file path.
     pub fn get_config_path(&self) -> &Path {
         self.config_path.as_path()
     }
@@ -215,18 +215,18 @@ impl PermissionManager {
     /// policy. A server may accurately declare a tool as mutating, but it
     /// cannot grant itself authority by claiming that a tool is read-only.
     pub fn apply_tool_annotations(&self, tools: &[Tool]) {
-        let mut write_annotated = Vec::new();
+        let mut mutating_tool_names = Vec::new();
         for tool in tools {
-            let Some(anns) = &tool.annotations else {
+            let Some(annotations) = &tool.annotations else {
                 continue;
             };
-            if anns.read_only_hint == Some(false) {
-                write_annotated.push(tool.name.to_string());
+            if annotations.read_only_hint == Some(false) {
+                mutating_tool_names.push(tool.name.to_string());
             }
         }
-        if !write_annotated.is_empty() {
+        if !mutating_tool_names.is_empty() {
             self.bulk_update_smart_approve_permissions(
-                &write_annotated,
+                &mutating_tool_names,
                 PermissionLevel::AskBefore,
             );
         }
@@ -248,10 +248,9 @@ impl PermissionManager {
         }
     }
 
-    /// Helper function to retrieve the permission level for a specific permission category and tool.
-    fn get_permission(&self, name: &str, principal_name: &str) -> Option<PermissionLevel> {
-        let map = match self.read_map() {
-            Ok(map) => map,
+    fn get_permission(&self, category: &str, principal_name: &str) -> Option<PermissionLevel> {
+        let permissions = match self.read_permissions_snapshot() {
+            Ok(permissions) => permissions,
             Err(error) => {
                 tracing::error!(
                     security.event_type = "permission_read_failed",
@@ -262,8 +261,7 @@ impl PermissionManager {
                 return Some(PermissionLevel::NeverAllow);
             }
         };
-        // Check if the permission category exists in the map
-        if let Some(permission_config) = map.get(name) {
+        if let Some(permission_config) = permissions.get(category) {
             // A denial outranks the other levels: a principal listed in never_allow stays denied
             // even when a stale entry also lists it under always_allow or ask_before.
             if permission_config
@@ -283,10 +281,9 @@ impl PermissionManager {
                 return Some(PermissionLevel::AskBefore);
             }
         }
-        None // Return None if no matching permission level is found
+        None
     }
 
-    /// Updates the user permission level for a specific tool.
     pub fn update_user_permission(
         &self,
         principal_name: &str,
@@ -295,6 +292,7 @@ impl PermissionManager {
         self.update_permission(USER_PERMISSION, principal_name, level)
     }
 
+    /// Commits the entire batch under one lock; an error means no update was published.
     pub fn bulk_update_user_permissions(
         &self,
         updates: &[(String, PermissionLevel)],
@@ -302,7 +300,6 @@ impl PermissionManager {
         self.apply_permission_updates(USER_PERMISSION, updates)
     }
 
-    /// Updates the smart approve permission level for a specific tool.
     pub fn update_smart_approve_permission(
         &self,
         principal_name: &str,
@@ -311,7 +308,6 @@ impl PermissionManager {
         self.update_permission(SMART_APPROVE_PERMISSION, principal_name, level)
     }
 
-    /// Updates the always-allow/never-allow status for a specific egress domain.
     pub fn update_egress_domain_permission(
         &self,
         domain: &str,
@@ -333,17 +329,17 @@ impl PermissionManager {
         )
     }
 
-    /// Helper function to update a permission level for a specific tool in a given permission category.
     fn update_permission(
         &self,
-        name: &str,
+        category: &str,
         principal_name: &str,
         level: PermissionLevel,
     ) -> Result<(), String> {
-        self.apply_permission_updates(name, &[(principal_name.to_string(), level)])
+        self.apply_permission_updates(category, &[(principal_name.to_string(), level)])
     }
 
     /// Removes all permission entries in an extension's tool namespace.
+    /// An empty extension name clears every category's entries.
     pub fn remove_extension(&self, extension_name: &str) -> anyhow::Result<()> {
         self.mutate_permissions(|map| {
             let prefix = format!("{extension_name}__");
@@ -366,6 +362,7 @@ impl PermissionManager {
 }
 
 fn acp_provider_principal(provider_name: &str, tool_name: &str) -> String {
+    // Tuple encoding keeps provider and tool names distinct even when they contain separators.
     serde_json::to_string(&(provider_name, tool_name))
         .expect("ACP provider permission principal must serialize")
 }
@@ -556,7 +553,7 @@ mod tests {
         );
 
         // Ensure it's removed from other levels
-        let map = manager.read_map().unwrap();
+        let map = manager.read_permissions_snapshot().unwrap();
         let config = map.get(USER_PERMISSION).unwrap();
         assert!(!config.always_allow.contains(&"tool7".to_string()));
         assert!(!config.ask_before.contains(&"tool7".to_string()));
@@ -582,7 +579,7 @@ mod tests {
         // Remove entries starting with "prefix"
         manager.remove_extension("prefix").unwrap();
 
-        let map = manager.read_map().unwrap();
+        let map = manager.read_permissions_snapshot().unwrap();
         let config = map.get(USER_PERMISSION).unwrap();
 
         // Verify entries with "prefix" are removed

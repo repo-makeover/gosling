@@ -189,3 +189,26 @@ renderer and embedded backend run from `/Applications/Gosling.app`; the backend
 reports 1.2.1. This closes the pending visible startup check. No Keychain access
 control was changed and no application backup was created. No live tool request
 was submitted. The repair/install report records the same updated disposition.
+
+## File-local readability follow-up (2026-09-08)
+
+The operator requested semantic-sugar and commenting improvements with each
+refactor confined to its source file. Starting from clean `da493ef4d`, this pass
+polished six permission-workflow files: configuration storage, tool inspection,
+workspace shell inspection, egress inspection, Desktop permission requests and
+approval buttons. Private names, existing limits and intent/contract comments
+are clearer; public interfaces, runtime strings, behavior, module boundaries and
+test assertions are preserved. No cross-file extraction or file move occurred.
+
+Catalog `governance-code-polish` supplied the naming/commenting workflow;
+`repair-language-syntactic-sugar` supplied semantic-preservation review guidance.
+The completed [readability report](../../polish/2026-09-08-permission-readability.md)
+records all 18 POL dispositions, local renames and the full diff audit.
+
+Before and after results match: 1,872 core tests passed with 3 opt-in benchmarks
+ignored, 20 permission/inspection integration tests passed and 86 Desktop tests
+passed. Core all-target Clippy with warnings denied, Desktop typecheck, rustfmt,
+Prettier and diff checks passed. Source review was performed by the implementing
+agent; larger-file splitting remains deferred under the operator's constraint.
+No application build, packaging, reinstall, backup or restart occurred in this
+readability pass. Test compilation was part of validation.

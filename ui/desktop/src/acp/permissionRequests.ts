@@ -9,6 +9,7 @@ interface PendingPermissionRequest {
 
 const pendingRequests = new Map<string, PendingPermissionRequest>();
 const requestGenerations = new Map<string, number>();
+const REQUEST_GENERATION_HISTORY_LIMIT = 500;
 const listeners = new Set<() => void>();
 let nextGeneration = 0;
 
@@ -17,6 +18,7 @@ export function subscribeAcpPermissionRequests(listener: () => void): () => void
   return () => listeners.delete(listener);
 }
 
+/** An opaque identity that changes when a session/tool ID is reused for a new request. */
 export function acpPermissionRequestIdentity(sessionId: string, toolCallId: string): string {
   const key = permissionRequestKey(sessionId, toolCallId);
   return JSON.stringify([sessionId, toolCallId, requestGenerations.get(key) ?? 0]);
@@ -26,32 +28,34 @@ function notifyPermissionRequests(): void {
   for (const listener of listeners) listener();
 }
 
+/** Replaces any pending request with the same IDs and waits for a decision or cancellation. */
 export async function requestAcpPermission(
   request: RequestPermissionRequest
 ): Promise<RequestPermissionResponse> {
   const key = permissionRequestKey(request.sessionId, request.toolCall.toolCallId);
-  const previous = pendingRequests.get(key);
-  if (previous) {
-    previous.resolve(cancelledPermissionResponse());
+  const replacedRequest = pendingRequests.get(key);
+  if (replacedRequest) {
+    replacedRequest.resolve(cancelledPermissionResponse());
   }
 
   return new Promise<RequestPermissionResponse>((resolve) => {
     pendingRequests.set(key, { request, resolve });
     requestGenerations.delete(key);
     requestGenerations.set(key, ++nextGeneration);
-    for (const oldKey of requestGenerations.keys()) {
-      if (requestGenerations.size <= 500) break;
-      if (!pendingRequests.has(oldKey)) requestGenerations.delete(oldKey);
+    // Pending requests may exceed the limit; only resolved history can be evicted.
+    for (const candidateKey of requestGenerations.keys()) {
+      if (requestGenerations.size <= REQUEST_GENERATION_HISTORY_LIMIT) break;
+      if (!pendingRequests.has(candidateKey)) requestGenerations.delete(candidateKey);
     }
     acpChatSessionActions.applyPermissionRequest(request);
     notifyPermissionRequests();
   });
 }
 
-// Non-consuming check for whether a permission request is still pending, so
-// a caller can validate liveness before an irreversible side effect (e.g. a
-// bulk backend permission mutation) rather than only discovering staleness
-// after the side effect already happened.
+/**
+ * Checks liveness without consuming the request. Async callers pass the captured
+ * identity so a replacement with the same IDs cannot authorize their next side effect.
+ */
 export function isAcpPermissionRequestPending(
   sessionId: string,
   toolCallId: string,
@@ -64,6 +68,10 @@ export function isAcpPermissionRequestPending(
   );
 }
 
+/**
+ * Returns false for stale requests or unavailable choices, leaving any pending request intact.
+ * Success acknowledges the choice's delivery, not the backend's persistent permission save.
+ */
 export function resolveAcpPermissionRequest(
   sessionId: string,
   toolCallId: string,

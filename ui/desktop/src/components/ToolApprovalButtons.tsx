@@ -78,7 +78,8 @@ function extensionNameFromToolName(toolName: string): string | undefined {
   return rest.length > 0 && extensionName ? extensionName : undefined;
 }
 
-const globalApprovalState = new Map<
+// This display history survives remounts; it does not establish saved permissions.
+const resolvedApprovalStates = new Map<
   string,
   {
     decision: Permission | null;
@@ -87,22 +88,23 @@ const globalApprovalState = new Map<
   }
 >();
 
-// The map outlives sessions so decisions survive remounts, but agents issue
-// many approvals per session — without a cap it grows for the window's
-// lifetime. Oldest entries belong to long-resolved requests, so evict those.
+// Bound history for the window's lifetime without evicting pending requests.
 const MAX_APPROVAL_STATES = 500;
 
-function recordApprovalState(
-  id: string,
+function rememberResolvedApproval(
+  requestIdentity: string,
   state: { decision: Permission | null; isClicked: boolean; bulkAllowedExtension?: string }
 ) {
-  if (!globalApprovalState.has(id) && globalApprovalState.size >= MAX_APPROVAL_STATES) {
-    const oldest = globalApprovalState.keys().next().value;
-    if (oldest !== undefined) {
-      globalApprovalState.delete(oldest);
+  if (
+    !resolvedApprovalStates.has(requestIdentity) &&
+    resolvedApprovalStates.size >= MAX_APPROVAL_STATES
+  ) {
+    const oldestRequestIdentity = resolvedApprovalStates.keys().next().value;
+    if (oldestRequestIdentity !== undefined) {
+      resolvedApprovalStates.delete(oldestRequestIdentity);
     }
   }
-  globalApprovalState.set(id, state);
+  resolvedApprovalStates.set(requestIdentity, state);
 }
 
 export interface ToolApprovalData {
@@ -118,6 +120,7 @@ export default function ToolApprovalButtons({ data }: { data: ToolApprovalData }
   const requestIdentity = useSyncExternalStore(subscribeAcpPermissionRequests, () =>
     acpPermissionRequestIdentity(data.sessionId, data.id)
   );
+  // Reused tool-call IDs must start with fresh button state for each request generation.
   return (
     <ApprovalRequestButtons key={requestIdentity} data={data} requestIdentity={requestIdentity} />
   );
@@ -133,7 +136,7 @@ function ApprovalRequestButtons({
   const intl = useIntl();
   const { id, toolName, prompt, domain, sessionId, isClicked: initialIsClicked } = data;
 
-  const storedState = globalApprovalState.get(requestIdentity);
+  const storedState = resolvedApprovalStates.get(requestIdentity);
   const [decision, setDecision] = useState<Permission | null>(storedState?.decision ?? null);
   const [isClicked, setIsClicked] = useState(storedState?.isClicked ?? initialIsClicked ?? false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
@@ -145,7 +148,7 @@ function ApprovalRequestButtons({
   const extensionName = extensionNameFromToolName(toolName);
 
   const setResolvedDecision = (action: Permission, extension?: string) => {
-    recordApprovalState(requestIdentity, {
+    rememberResolvedApproval(requestIdentity, {
       decision: action,
       isClicked: true,
       bulkAllowedExtension: extension,
@@ -163,8 +166,7 @@ function ApprovalRequestButtons({
         setApprovalError(intl.formatMessage(i18n.staleApprovalRequest));
       }
     } catch (err) {
-      // Only the stale path surfaced anything; a thrown error left the
-      // buttons looking dead with the tool still blocked. (WFG-GOS-004)
+      // Delivery failures need visible feedback while the tool may still be waiting. (WFG-GOS-004)
       console.error('Error confirming tool action:', err);
       setApprovalError(intl.formatMessage(i18n.failedToSubmitDecision));
     }
@@ -184,9 +186,12 @@ function ApprovalRequestButtons({
     setIsAllowingExtension(true);
     try {
       const tools = await listTools(sessionId, extensionName);
-      const toolPermissions = (tools.length > 0 ? tools.map((t) => t.name) : [toolName]).map(
-        (name) => ({ toolName: name, permission: 'always_allow' as const })
-      );
+      const extensionToolNames = tools.length > 0 ? tools.map((tool) => tool.name) : [toolName];
+      const toolPermissions = extensionToolNames.map((name) => ({
+        toolName: name,
+        permission: 'always_allow' as const,
+      }));
+      // Tool discovery can outlive a request; recheck before persisting grants.
       if (!isAcpPermissionRequestPending(sessionId, id, requestIdentity)) {
         setApprovalError(intl.formatMessage(i18n.staleApprovalRequest));
         return;
@@ -234,13 +239,8 @@ function ApprovalRequestButtons({
   return (
     <>
       {/*
-        Visual weight follows consequence (WEB-GOS-001). Previously all three
-        affirmative buttons were `secondary` — so "Always Allow", which outlives
-        this call, looked identical to the single-call "Allow Once" — while
-        Deny was `outline`, the faintest control on the row. The persistent
-        grants are now de-emphasized and grouped after Deny, so the two
-        one-shot decisions read as the default pair and a lasting grant takes a
-        deliberate look to find.
+        Keep one-time decisions prominent and persistent grants secondary
+        because those grants outlive this request. (WEB-GOS-001)
       */}
       <div className="flex items-center gap-2 mt-2 flex-wrap">
         <Button
