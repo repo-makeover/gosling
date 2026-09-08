@@ -1,12 +1,18 @@
 ---
-title: Goose v1.47 compatibility
-description: Source-grounded compatibility notes for three Goose v1.47 desktop and MCP features in gosling v1.1.0.
+title: Goose v1.47 compatibility (historical)
+description: Historical gosling v1.1.0 import notes for Git branch selection, registered OAuth clients, and recent models.
 ---
 
 # Goose v1.47 compatibility
 
-This guide compares Goose `v1.47.0` with gosling `v1.1.0` for the three features
-introduced in that Goose release: a Git branch indicator, pre-registered OAuth
+:::info Historical compatibility record
+This page preserves the 2026-08-23 import snapshot for gosling `v1.1.0`. The
+[current feature comparison](goose-comparison.md) records the versions and date
+of the latest source review.
+:::
+
+This guide compares Goose `v1.47.0` with gosling `v1.1.0` for three imported
+features: a Git branch indicator, pre-registered OAuth
 clients for Streamable HTTP MCP extensions, and recently used models in the
 Desktop picker. The implementations were adapted from the Goose source and use
 gosling’s existing Electron, ACP, configuration, and RMCP 1.7 seams. They aim

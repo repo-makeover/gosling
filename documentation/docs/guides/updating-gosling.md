@@ -13,8 +13,12 @@ import LinuxDesktopInstallButtons from '@site/src/components/LinuxDesktopInstall
 
 The gosling CLI and desktop apps are under active and continuous development. To get the newest features and fixes, you should periodically update your gosling client using the following instructions.
 
-:::info Updating to v1.0.0
-Read the [v1.0.0 release notes](/docs/release-notes/v1.0.0) before updating. After the update, run `gosling --version` for the CLI and check **Help > About** in Desktop. The `stable` channel is authoritative only after the v1.0.0 tag, artifacts, and release workflow have been published successfully.
+:::info Check the version you receive
+The current source/local-build version is `v1.2.2` as of 2026-09-08; see the
+[build notes](../release-notes/v1.2.2.md). Published channels may carry an earlier
+version until their release artifacts are uploaded. Read the notes for the
+[published release](https://github.com/cephalopod-ai/gosling/releases/latest), then
+run `gosling --version` for the CLI and check **Help > About** in Desktop after updating.
 :::
 
 gosling uses its own config, data, session database, keyring service, deep-link scheme, and app identity. Updating gosling must not overwrite or migrate an installed goose application implicitly.

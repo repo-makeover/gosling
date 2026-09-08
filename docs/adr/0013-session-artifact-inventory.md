@@ -60,3 +60,18 @@ artifact's `resolvedPath`/`lastSeenAt` version in its session presentation state
 version at the same path can appear again. Research Library deletion reflects the actual directory
 contents and leaves separate copies elsewhere intact. Merely listing a file still grants no
 additional filesystem authority.
+
+## Repository display filter (2026-09-08)
+
+The Desktop Outputs pane has a `Hide repository files` switch, off by default and persisted
+with the workbench's window preferences. It further filters the configured extension list,
+hiding recognized source-code/project filenames and files beneath `.git`, `.hg`, or `.svn`
+markers. A `.git` file also identifies a worktree. The displayed count and hidden count
+reflect this filter; existing preview tabs and durable artifact metadata remain intact.
+
+Repository classification checks ancestor marker metadata in batches of at most 200 paths,
+after the existing per-window artifact guard resolves and authorizes each file. It does not
+read marker contents, scan directory listings, invoke Git, or grant file access. Paths whose
+repository membership cannot be checked stay visible with an explanatory status. Ordinary
+data/document extensions outside repositories are retained unless their filename identifies
+a project file, such as `package.json` or `requirements.txt`.

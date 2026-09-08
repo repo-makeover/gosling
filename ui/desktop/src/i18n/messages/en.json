@@ -68,6 +68,9 @@
   "artifactPane.blocked": {
     "defaultMessage": "Blocked"
   },
+  "artifactPane.checkingRepositories": {
+    "defaultMessage": "Checking repository folders…"
+  },
   "artifactPane.closePane": {
     "defaultMessage": "Close inputs and outputs pane"
   },
@@ -82,6 +85,9 @@
   },
   "artifactPane.grantAccessToPreview": {
     "defaultMessage": "Select this file to grant access and preview it"
+  },
+  "artifactPane.hideRepositoryFiles": {
+    "defaultMessage": "Hide repository files"
   },
   "artifactPane.inputEmptyBody": {
     "defaultMessage": "Uploaded files and pasted content added to the session will appear here."
@@ -133,6 +139,15 @@
   },
   "artifactPane.projectScope": {
     "defaultMessage": "Project"
+  },
+  "artifactPane.repositoryCheckUnavailable": {
+    "defaultMessage": "Some files could not be checked and remain visible."
+  },
+  "artifactPane.repositoryFilesHidden": {
+    "defaultMessage": "{count} hidden"
+  },
+  "artifactPane.repositoryFilterEmpty": {
+    "defaultMessage": "All matching outputs are hidden by this filter."
   },
   "artifactPane.retryInputs": {
     "defaultMessage": "Retry"

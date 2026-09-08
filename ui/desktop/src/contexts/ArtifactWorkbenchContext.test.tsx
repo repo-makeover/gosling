@@ -16,6 +16,25 @@ describe('ArtifactWorkbenchProvider', () => {
     localStorage.clear();
   });
 
+  it('remembers the repository filter across sessions and remounts', () => {
+    const view = render(
+      <ArtifactWorkbenchProvider>
+        <Harness />
+      </ArtifactWorkbenchProvider>
+    );
+    expect(workbench.hideRepositoryFiles).toBe(false);
+    act(() => workbench.setHideRepositoryFiles(true));
+    act(() => workbench.setVisibleSession('another-session', []));
+    expect(workbench.hideRepositoryFiles).toBe(true);
+    view.unmount();
+    render(
+      <ArtifactWorkbenchProvider>
+        <Harness />
+      </ArtifactWorkbenchProvider>
+    );
+    expect(workbench.hideRepositoryFiles).toBe(true);
+  });
+
   it('opens local files and transient tool outputs without a source-specific contract', () => {
     render(
       <ArtifactWorkbenchProvider>

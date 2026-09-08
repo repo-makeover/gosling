@@ -30,36 +30,41 @@ for custom distributions.
 
 ### Key Security Hardening
 
-Relative to the inherited baseline, gosling implements several safety and security hardening improvements:
+gosling's current source includes these controls. Their presence is not a security ranking against current Goose; the dated comparison below identifies the specific behaviors checked in both projects.
 
-* **Fail-Closed Tool Inspection**: In upstream, if a tool inspector encountered an error (e.g., timeout, network issue, or internal error), it logged the error and allowed the loop to continue. Because the permission baseline in auto-approval mode is `Allow`, a failing safety inspector would silently let tools execute ungated. Gosling fixes this by synthesizing a `RequireApproval` safety action when a tool inspector fails, forcing execution to halt for manual human approval.
-* **Confined MCP Cache Tool Paths (Directory Traversal Hardening)**: Restricts the MCP `cache` command to the sandbox/cache directory via path canonicalization and membership verification, preventing directory traversal injections from reading or deleting files outside the sandbox.
+* **Fail-Closed Tool Inspection**: An enabled tool inspector that returns an error produces a `RequireApproval` result for every affected request. Autonomous mode preserves this failure gate.
+* **Authorized Desktop File Access**: Outputs preview, reveal, copy, and repository classification pass through the per-window artifact guard. Inventory metadata alone grants no filesystem access.
 * **Restricted File & Directory Permissions**: 
   - Enforces safe file permissions (`0o600`) for token and session files containing sensitive API keys and OAuth tokens.
   - Restricts the session database directory (`sessions.db` along with SQLite `-wal` and `-shm` sidecar files) to owner-only access (`0o700`), keeping conversation history and echoed secrets protected from other local users.
 * **Option Injection Protection**: Added `--` end-of-options guards to `git clone` during plugin installation, preventing command/option injection attacks via malicious URL strings starting with a hyphen.
-* **Safer Defaults for Agent Execution**: Tightened default agent permissions and fail-safe paths around code execution, provider configuration, and security scanning so uncertain states move toward review instead of silent execution.
+* **Persisted Permission Denials**: A stored denial takes precedence over an allow in the same policy category; unreadable permission state is treated as denied. Ordinary actions can still proceed automatically in Autonomous mode.
 
-### Feature comparison (Goose v1.47.0 vs. gosling v1.1.0)
+### Feature comparison (Goose v1.49.0 vs. gosling v1.2.2)
 
-This compatibility view is source-based: Goose is the `v1.47.0` release tag and
-gosling is the local `v1.1.0` source. It is not a benchmark, certification, or
-claim of exact behavioral parity. See the [detailed compatibility guide](documentation/docs/guides/goose-v1-47-compatibility.md).
+Checked **2026-09-08** against [Goose's latest stable release, v1.49.0](https://github.com/aaif-goose/goose/releases/tag/v1.49.0)
+(published September 3) and gosling's current local source/build version, `v1.2.2`.
+These are source observations, not runtime parity or security certification.
+The [detailed comparison](documentation/docs/guides/goose-comparison.md) pins the
+upstream commit, links the evidence, and records the refresh procedure.
 
-| Feature | Goose | Gosling | Notes |
-|---|---|---|---|
-| **Core AI Agent Engine** | Yes | Yes | Both support standard LLM chat and tool-calling loops. |
-| **Model Context Protocol (MCP)** | Yes | Yes | Supports MCP and discovers a catalog of 70+ external extensions; compatibility varies by server, transport, and platform and is not exhaustively certified. |
-| **Cloud Providers** | 15+ | 15+ | Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Azure, Bedrock, etc. |
-| **Local Inference/Models** | **Yes** | **No** | Goose bundles candle, MLX, llama.cpp, and Hugging Face loaders. Gosling does not include these loaders. |
-| **CLI Command Suite** | `goose`, `goose serve`, `recipe`, `schedule`, `gateway`, `local-models` | `gosling`, `gosling serve` | Gosling drops `recipe`, `schedule`, `gateway`, and `local-models` subcommands. |
-| **Coexistence** | No | **Yes** | Gosling runs side-by-side with Goose using isolated configs, databases, keyring, and deep links. Shared AAIF paths such as `~/.agents` remain intentionally interoperable. |
-| **Context Manager MVP** | No | **Yes** | Gosling features an MVP context manager with localized LLM summarization and a `FileMemorySource` backend for retrieved memory. |
-| **Fail-Closed Tool Inspection** | No | **Yes** | Gosling escalates safety/security inspector failures to RequireApproval. Goose fails open. |
-| **Path Sandbox Enforcement** | Weak | **Yes** | Gosling restricts directory traversals (`../`) in cache extension paths. |
-| **Desktop Git branch indicator** | Yes | **Yes** | Displays the current branch for the selected, renderer-authorized working directory; gosling supports local-branch switching. |
-| **Pre-registered OAuth for Streamable HTTP MCP** | Yes | **Yes** | `client_id`, `client_secret_key`, and `scopes` configure static OAuth clients. The secret is resolved from an extension environment or gosling’s secret store, never inline. |
-| **Recently used model picker** | Yes | **Yes** | Desktop retains up to five prior successful model/provider selections and exposes them above Change Model. |
+| Feature | Goose v1.49.0 | gosling v1.2.2 |
+|---|---|---|
+| **Agent, MCP, and providers** | Chat/tool loops, MCP extensions, cloud and local-service providers | Same capability categories; provider and extension coverage must be checked individually |
+| **Local models** | Ollama plus integrated llama.cpp inference and optional MLX support | Ollama and other configured services; no bundled inference runtime |
+| **CLI** | Sessions, run, ACP, serve, MCP, skills, plugins; also recipes, schedules, gateways, local-model management | Sessions, run, ACP, serve, MCP, skills, plugins; also review, projects, terminal integration, and TUI; no recipe/schedule/gateway/local-models commands |
+| **Context and memory** | Conversation compaction and a built-in memory MCP extension | Conversation compaction, summarization, and file-backed retrieved memory |
+| **Desktop Git branch menu** | Branch display and switching | Branch display and local switching through authorized-directory IPC |
+| **Registered OAuth clients for HTTP MCP** | `client_id`, `client_secret_key`, `scopes` | Same configuration fields, with gosling's own resolver and transport implementation |
+| **Recent model picker** | Stores up to five model/provider pairs | Stores up to five successful model/provider selections |
+| **Tool lifecycle hooks** | Includes `PreToolUseResult`, `tool_call_id`, and `on_failure` | Earlier hook events; these newer fields/events are not implemented |
+| **Inspector errors** | Manager logs the error and continues; other controls still apply | Manager adds an approval requirement for every affected tool request |
+| **Separate app state** | Uses Goose's product namespace | Uses gosling's namespace, allowing both apps to coexist; `~/.agents` remains shared |
+
+gosling also provides Desktop workspace credential profiles and a session **Outputs**
+inventory. In `v1.2.2`, **Hide repository files** hides recognized source/project files
+and files within repository directories. See [Workspaces and Outputs](documentation/docs/guides/workspaces.md#product-outputs-and-exports)
+for extension settings, previews, and filter behavior.
 
 ## What's included
 
@@ -102,7 +107,7 @@ The Rust core owns agent execution, provider contracts, permissions, session per
 
 The current validation reference is the [2026-08-15 live playtest](docs/cloud/2026-08-15-live-all-scenarios-playtest.md): 58 pass, 5 fail, 47 blocked across all 110 scenario cards. Blocked is dominated by Desktop cards, which had no GUI driver — that is missing coverage, not a pass. The [2026-08-15 audit](docs/cloud/2026-08-15-master-report.md) and its [repair campaign](docs/logs/session/2026-08-16-audit-repair-campaign.md) record what was found and what has been fixed since.
 
-Current release: `v1.2.1`. See the [v1.2.1 release notes](documentation/docs/release-notes/v1.2.1.md) for what changed since the preceding published release. The source-tree gates — workspace format, Clippy, the full Rust suite, and the Desktop typecheck and tests — passed on 2026-09-06. The maintainer-owned installed-Desktop, signing, and artifact gates in the [release checklist](RELEASE_CHECKLIST.md) are tracked there and are not claimed by this line. The preceding stable GitHub release uses the noncanonical tag `v1.0.1-optimization-and-workspaces`; that historical discrepancy remains documented in the [release process](RELEASE.md) and will not be repaired by moving an existing tag.
+Current source/local-build version: `v1.2.2`. See the [v1.2.2 build notes](documentation/docs/release-notes/v1.2.2.md) for the Outputs repository filter. This local version bump does not publish a GitHub release. The [v1.2.1 release notes](documentation/docs/release-notes/v1.2.1.md) retain the preceding release reference. The source-tree gates — workspace format, Clippy, the full Rust suite, and the Desktop typecheck and tests — passed on 2026-09-06. The maintainer-owned installed-Desktop, signing, and artifact gates in the [release checklist](RELEASE_CHECKLIST.md) are tracked there and are not claimed by this line. The preceding stable GitHub release uses the noncanonical tag `v1.0.1-optimization-and-workspaces`; that historical discrepancy remains documented in the [release process](RELEASE.md) and will not be repaired by moving an existing tag.
 
 ## Known limits
 
@@ -146,7 +151,7 @@ for configuration, trust, and removal guidance.
 ## Quick links
 
 - [Documentation index](documentation/INDEX.md) - user manuals, architecture, publishing, and stewardship
-- [v1.2.1 release notes](documentation/docs/release-notes/v1.2.1.md) and [v1.0.0 release notes](documentation/docs/release-notes/v1.0.0.md)
+- [v1.2.2 local build notes](documentation/docs/release-notes/v1.2.2.md), [v1.2.1 notes](documentation/docs/release-notes/v1.2.1.md), and [release-note archive](documentation/docs/release-notes/)
 - [Release process](RELEASE.md) and [release checklist](RELEASE_CHECKLIST.md)
 - [Known issues](documentation/docs/troubleshooting/known-issues.md)
 - [Current validation ledger](docs/polish/test-ledger.md)

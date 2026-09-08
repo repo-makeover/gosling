@@ -30,7 +30,7 @@ Open the sidebar and expand **Workspaces**.
 
 - Click a workspace row, or choose **Show its chats** from its menu, to filter the existing chat list.
 - Choose the `+` action next to a workspace, or **New chat in this workspace** from its menu, to open New Chat with that workspace preselected.
-- The global **New Chat** action leaves the workspace selector unselected so you can choose explicitly.
+- The global **New Chat** action preselects the active workspace, falling back to the default workspace. You can override it before starting the chat.
 - Choose **All workspaces** to see sessions across every workspace.
 
 Filtering workspaces does not move or restart the chat currently on screen and does not change
@@ -106,13 +106,15 @@ session behavior. Session search still works across workspaces when **All worksp
 The agent receives named output paths and product types as structured, non-secret session context.
 Use specific destinations for their matching product types and the default destination otherwise.
 
-The **Outputs** pane also shows a durable inventory for the visible session. Previewable entries from
+The **Outputs** pane also shows a durable inventory for the visible session. Entries from
 successful write/edit tools, local tool resources, explicit output metadata, and completed assistant
 file references appear automatically as `Outputs N`; clicking a message chip is not required. The list
-includes common code and configuration files such as `.rs`, `.ts`, `.py`, `.sh`, `.toml`, and `.yaml`.
-Entries without a supported in-app preview are excluded from the list and its count. Switching chats
-immediately switches the list. Missing files with a supported preview type remain named after restart
-or resume so they cannot be confused with another file that shares a basename.
+uses the extensions selected in **Settings → App → Output files**. The defaults are `.pdf`, `.md`,
+`.txt`, `.doc`, `.docx`, `.jpg`, `.png`, `.yaml`, and `.json`. Add extensions such as `.rs`, `.ts`,
+`.py`, `.sh`, or `.toml` to include code/configuration files. Files without an in-app preview can
+still appear for reveal or external opening. Switching chats immediately switches the list. Missing
+files that match the display filters remain named after restart or resume so they cannot be confused
+with another file that shares a basename.
 
 Inventory and preview are intentionally separate. Discovering an output does not open the pane, read
 the file, create an output directory, or grant access. Selecting an item opens a session-scoped preview
@@ -122,6 +124,26 @@ can be previewed directly through an exact-file capability. A file outside the s
 roots or validated workspace outputs remains blocked unless you
 explicitly select it with the file picker; code, configuration (including `.env`), and MCP/tool
 metadata never receive that automatic capability.
+
+### Filter repository files
+
+In the Outputs pane, enable **Hide repository files** to hide:
+
+- recognized source-code files, such as `.rs`, `.ts`, `.py`, and `.sh`;
+- recognized project files, such as `Cargo.toml`, `package.json`, and `requirements.txt`;
+- files inside Git, Mercurial, or Subversion repository directories, including Git worktrees.
+
+The switch is off by default and remembers its setting. It applies after the extension filter and
+updates the visible list/count, with a separate count of hidden entries. A report saved inside a
+repository is hidden too; turn the switch off to see it again. Ordinary documents and data outside
+repositories remain visible unless their filename identifies a project file.
+
+Repository membership is checked only for files gosling is authorized to inspect. If it cannot be
+checked, the pane shows a status and keeps those entries visible unless their filename already
+identifies source/project content. Filtering preserves files, stored inventory, and open preview tabs.
+It changes presentation only; it does not change file access or the agent's working folders.
+
+### Save, export, and download
 
 gosling's artifact router applies the same rule to every Desktop-owned save, export, and native
 download. It recognizes documents, spreadsheets, presentations, images, video, code, data,

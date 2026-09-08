@@ -124,8 +124,14 @@ path. Forking copies metadata, deleting a session cascades metadata, and missing
 Legacy migration parses persisted messages once and never scans output directories.
 
 The Desktop loads the paginated inventory with the session and applies durable `artifact_update`
-notifications idempotently. Inventory metadata is backend-owned; the renderer presents only entries
-whose MIME type or extension maps to a preview compatible with the file reader. Preview tabs and
+notifications idempotently. Inventory metadata is backend-owned; the renderer presents entries
+whose extensions match the user's persisted Outputs display list. An in-app preview renderer is not
+required for listing, reveal, or external opening. The optional, remembered `Hide repository files`
+switch further excludes recognized source/project filenames and paths beneath Git, Mercurial, or
+Subversion markers, including Git worktrees. Authorized ancestor-marker metadata checks determine
+repository membership; unavailable checks leave entries visible with a status. This filter changes
+the displayed inventory and count without removing metadata or closing previews. See ADR-0013 for
+the classification boundary. Preview tabs and
 active selection are separate, session-scoped user state. Listing an artifact never opens the pane,
 reads a file, creates an output folder, copies a file, or grants access. Selection still traverses the
 Electron file guard, so only

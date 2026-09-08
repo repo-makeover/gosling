@@ -15,6 +15,7 @@ import type {
 } from './types/artifactRouter';
 import type { ResearchLibraryListing } from './utils/researchLibrary';
 import type { ArtifactTrashResult } from './types/artifactTrash';
+import type { ArtifactRepositoryClassification } from './utils/artifactRepository';
 
 // Mapping from settings keys to their old localStorage keys for lazy migration
 const localStorageKeyMap: Partial<Record<SettingKey, string>> = {
@@ -143,6 +144,7 @@ type ElectronAPI = {
   readArtifactTitles: (
     requests: Array<{ filePath: string; baseDirectory?: string }>
   ) => Promise<Record<string, string>>;
+  classifyArtifactRepositories: (filePaths: string[]) => Promise<ArtifactRepositoryClassification>;
   openArtifactFile: (filePath: string, baseDirectory?: string) => Promise<boolean>;
   revealArtifactFile: (filePath: string, baseDirectory?: string) => Promise<void>;
   writeFile: (directory: string, content: string) => Promise<boolean>;
@@ -244,6 +246,8 @@ const electronAPI: ElectronAPI = {
     ipcRenderer.invoke('read-artifact-file', filePath, baseDirectory),
   readArtifactTitles: (requests: Array<{ filePath: string; baseDirectory?: string }>) =>
     ipcRenderer.invoke('read-artifact-titles', requests),
+  classifyArtifactRepositories: (filePaths: string[]) =>
+    ipcRenderer.invoke('classify-artifact-repositories', filePaths),
   openArtifactFile: (filePath: string, baseDirectory?: string) =>
     ipcRenderer.invoke('open-artifact-file', filePath, baseDirectory),
   revealArtifactFile: (filePath: string, baseDirectory?: string) =>

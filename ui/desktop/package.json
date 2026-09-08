@@ -1,7 +1,7 @@
 {
   "name": "gosling-app",
   "productName": "Gosling",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Gosling App - a lighter fork of goose",
   "engines": {
     "node": "^24.10.0",

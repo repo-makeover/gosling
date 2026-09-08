@@ -34,6 +34,7 @@ describe('ArtifactPane', () => {
   const readArtifactFile = vi.fn();
   const readArtifactTitles = vi.fn();
   const trashArtifactFiles = vi.fn();
+  const classifyArtifactRepositories = vi.fn();
 
   function Harness() {
     const { openContent, openFile, setVisibleSession } = useArtifactWorkbench();
@@ -143,12 +144,21 @@ describe('ArtifactPane', () => {
     });
     readArtifactTitles.mockReset();
     readArtifactTitles.mockResolvedValue({});
+    classifyArtifactRepositories.mockReset().mockResolvedValue({
+      repositoryPaths: [],
+      unavailablePaths: [],
+    });
     trashArtifactFiles
       .mockReset()
       .mockImplementation(async (paths: string[]) =>
         paths.map((path) => ({ path, status: 'trashed' }))
       );
-    Object.assign(window.electron, { readArtifactFile, readArtifactTitles, trashArtifactFiles });
+    Object.assign(window.electron, {
+      readArtifactFile,
+      readArtifactTitles,
+      trashArtifactFiles,
+      classifyArtifactRepositories,
+    });
     vi.mocked(window.electron.getResearchLibraryPath).mockResolvedValue(
       '/Users/tester/Documents/Gosling Research Library'
     );
@@ -287,6 +297,164 @@ describe('ArtifactPane', () => {
       screen.queryByText('This file type does not have an in-app preview yet.')
     ).not.toBeInTheDocument();
     expect(readArtifactFile).not.toHaveBeenCalled();
+  });
+
+  it('toggles source and repository files while preserving previews and the extension filter', async () => {
+    readArtifactFile.mockResolvedValue({
+      content: 'print("hello")',
+      encoding: 'utf8',
+      error: null,
+      filePath: '/outputs/analysis.py',
+      found: true,
+      sizeBytes: 14,
+      truncated: false,
+    });
+    classifyArtifactRepositories.mockResolvedValue({
+      repositoryPaths: ['/outputs/brief.docx'],
+      unavailablePaths: [],
+    });
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Load mixed outputs' }));
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent('outputFileExtensionsChanged', {
+          detail: ['md', 'docx', 'py'],
+        })
+      )
+    );
+    fireEvent.click(screen.getByTitle('/outputs/analysis.py'));
+    expect(screen.getByRole('tab', { name: 'Outputs 3' })).toBeInTheDocument();
+    expect(classifyArtifactRepositories).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Hide repository files' }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Outputs 1' })).toBeInTheDocument());
+    expect(screen.getByText('2 hidden')).toBeInTheDocument();
+    expect(screen.getByTitle('/outputs/report.md')).toBeInTheDocument();
+    expect(screen.queryByTitle('/outputs/brief.docx')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Select analysis.py' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'analysis.py' })).toBeInTheDocument();
+    expect(classifyArtifactRepositories).toHaveBeenCalledWith([
+      '/outputs/report.md',
+      '/outputs/brief.docx',
+    ]);
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Hide repository files' }));
+    expect(screen.getByRole('tab', { name: 'Outputs 3' })).toBeInTheDocument();
+    expect(screen.getByTitle('/outputs/brief.docx')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select analysis.py' })).toBeInTheDocument();
+    expect(screen.queryByText('engine.rs')).not.toBeInTheDocument();
+    expect(trashArtifactFiles).not.toHaveBeenCalled();
+  });
+
+  it('checks every output in inventories larger than the IPC batch limit', async () => {
+    let setVisibleSession!: ReturnType<typeof useArtifactWorkbench>['setVisibleSession'];
+    function LargeInventory() {
+      setVisibleSession = useArtifactWorkbench().setVisibleSession;
+      return <ArtifactPane />;
+    }
+    classifyArtifactRepositories.mockImplementation(async (paths: string[]) => ({
+      repositoryPaths: paths,
+      unavailablePaths: [],
+    }));
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <LargeInventory />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    await act(async () =>
+      setVisibleSession(
+        'many-outputs',
+        Array.from({ length: 205 }, (_, index) => ({
+          sessionId: 'many-outputs',
+          displayPath: `document-${index}.md`,
+          resolvedPath: `/repo/docs/document-${index}.md`,
+          baseWorkingDir: '/repo',
+          relation: 'created' as const,
+          provenance: 'built_in_tool' as const,
+          firstSeenAt: '2026-01-01T00:00:00Z',
+          lastSeenAt: '2026-01-01T00:00:00Z',
+        }))
+      )
+    );
+    fireEvent.click(screen.getByRole('switch', { name: 'Hide repository files' }));
+    expect(await screen.findByText('205 hidden')).toBeInTheDocument();
+    expect(classifyArtifactRepositories.mock.calls.map(([paths]) => paths.length)).toEqual([
+      200, 5,
+    ]);
+    expect(screen.getByRole('tab', { name: 'Outputs 0' })).toBeInTheDocument();
+  });
+
+  it('explains when every matching output is hidden', async () => {
+    classifyArtifactRepositories.mockResolvedValue({
+      repositoryPaths: ['/outputs/report.md', '/outputs/brief.docx'],
+      unavailablePaths: [],
+    });
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Load mixed outputs' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Hide repository files' }));
+    expect(
+      await screen.findByText('All matching outputs are hidden by this filter.')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Outputs 0' })).toBeInTheDocument();
+  });
+
+  it('keeps unclassified files visible and reports an unavailable repository check', async () => {
+    classifyArtifactRepositories.mockRejectedValue(new Error('IPC unavailable'));
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Load mixed outputs' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Hide repository files' }));
+    expect(
+      await screen.findByText('Some files could not be checked and remain visible.')
+    ).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Outputs 2' })).toBeInTheDocument();
+  });
+
+  it('discards a repository check that completes after changing sessions', async () => {
+    let resolveCheck!: (result: { repositoryPaths: string[]; unavailablePaths: string[] }) => void;
+    classifyArtifactRepositories.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCheck = resolve;
+        })
+    );
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Load mixed outputs' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Hide repository files' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load MIME PDF' }));
+    await waitFor(() =>
+      expect(screen.queryByText('Checking repository folders…')).not.toBeInTheDocument()
+    );
+    await act(async () =>
+      resolveCheck({ repositoryPaths: ['/outputs/report.pdf'], unavailablePaths: [] })
+    );
+    expect(screen.getByRole('tab', { name: 'Outputs 1' })).toBeInTheDocument();
+    expect(screen.getByTitle('/outputs/report.pdf')).toBeInTheDocument();
   });
 
   it('keeps configured files without an in-app preview available for external opening', async () => {

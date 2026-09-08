@@ -21,6 +21,7 @@ interface SessionPreviewState {
 }
 
 interface PersistedWorkbench {
+  hideRepositoryFiles: boolean;
   isOpen: boolean;
   sessions: Record<string, SessionPreviewState>;
   tabs?: ArtifactTab[];
@@ -42,6 +43,7 @@ interface ArtifactWorkbenchValue {
   artifacts: SessionArtifactDto[];
   closeTab: (id: string) => void;
   forgetTrashedFiles: (paths: string[]) => void;
+  hideRepositoryFiles: boolean;
   isOpen: boolean;
   openArtifact: (artifact: SessionArtifactDto) => void;
   openContent: (input: OpenContentInput) => void;
@@ -49,6 +51,7 @@ interface ArtifactWorkbenchValue {
   resolveFilePath: (id: string, path: string) => void;
   setActiveTabId: (id: string) => void;
   setIsOpen: (isOpen: boolean) => void;
+  setHideRepositoryFiles: (hide: boolean) => void;
   setVisibleSession: (sessionId: string | null, artifacts: SessionArtifactDto[]) => void;
   setWidth: (width: number) => void;
   tabs: ArtifactTab[];
@@ -107,6 +110,7 @@ function loadPersistedWorkbench(): PersistedWorkbench {
       });
     }
     return {
+      hideRepositoryFiles: parsed.hideRepositoryFiles === true,
       isOpen: parsed.isOpen === true,
       sessions,
       width:
@@ -115,7 +119,7 @@ function loadPersistedWorkbench(): PersistedWorkbench {
           : DEFAULT_WIDTH,
     };
   } catch {
-    return { isOpen: false, sessions: {}, width: DEFAULT_WIDTH };
+    return { hideRepositoryFiles: false, isOpen: false, sessions: {}, width: DEFAULT_WIDTH };
   }
 }
 
@@ -127,6 +131,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
   >({});
   const [sessions, setSessions] = useState(initial.sessions);
   const [isOpen, setIsOpen] = useState(initial.isOpen);
+  const [hideRepositoryFiles, setHideRepositoryFiles] = useState(initial.hideRepositoryFiles);
   const [width, setWidthState] = useState(initial.width);
   const current = sessions[visibleSessionId] ?? emptySessionState();
   const deletedArtifacts = sessions[visibleSessionId]?.deletedArtifacts;
@@ -141,6 +146,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
   useEffect(() => {
     const fallback = sessions[DEFAULT_SESSION_ID] ?? emptySessionState();
     const persisted: PersistedWorkbench = {
+      hideRepositoryFiles,
       isOpen,
       sessions: Object.fromEntries(
         Object.entries(sessions).map(([sessionId, state]) => [
@@ -153,7 +159,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
       width,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
-  }, [isOpen, sessions, width]);
+  }, [hideRepositoryFiles, isOpen, sessions, width]);
 
   const updateCurrent = useCallback(
     (update: (state: SessionPreviewState) => SessionPreviewState) => {
@@ -359,6 +365,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
       artifacts,
       closeTab,
       forgetTrashedFiles,
+      hideRepositoryFiles,
       isOpen,
       openArtifact,
       openContent,
@@ -366,6 +373,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
       resolveFilePath,
       setActiveTabId,
       setIsOpen,
+      setHideRepositoryFiles,
       setVisibleSession,
       setWidth,
       tabs: current.tabs,
@@ -378,6 +386,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
       artifacts,
       closeTab,
       forgetTrashedFiles,
+      hideRepositoryFiles,
       current.activeTabId,
       current.tabs,
       isOpen,

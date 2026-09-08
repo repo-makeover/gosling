@@ -21,6 +21,8 @@ import { useArtifactWorkbench } from '../../contexts/ArtifactWorkbenchContext';
 import { cn } from '../../utils';
 import MarkdownContent from '../MarkdownContent';
 import { Button } from '../ui/button';
+import { Switch } from '../ui/switch';
+import { ARTIFACT_REPOSITORY_BATCH_LIMIT, isSourceCodeFile } from '../../utils/artifactRepository';
 import {
   addSandboxCsp,
   hasDisplayedFileExtension,
@@ -47,6 +49,26 @@ import { ArtifactFileList } from './ArtifactFileList';
 
 const i18n = defineMessages({
   outputs: { id: 'artifactPane.outputs', defaultMessage: 'Outputs' },
+  hideRepositoryFiles: {
+    id: 'artifactPane.hideRepositoryFiles',
+    defaultMessage: 'Hide repository files',
+  },
+  repositoryFilesHidden: {
+    id: 'artifactPane.repositoryFilesHidden',
+    defaultMessage: '{count} hidden',
+  },
+  checkingRepositories: {
+    id: 'artifactPane.checkingRepositories',
+    defaultMessage: 'Checking repository folders…',
+  },
+  repositoryCheckUnavailable: {
+    id: 'artifactPane.repositoryCheckUnavailable',
+    defaultMessage: 'Some files could not be checked and remain visible.',
+  },
+  repositoryFilterEmpty: {
+    id: 'artifactPane.repositoryFilterEmpty',
+    defaultMessage: 'All matching outputs are hidden by this filter.',
+  },
   inputs: { id: 'artifactPane.inputs', defaultMessage: 'Inputs' },
   library: { id: 'artifactPane.library', defaultMessage: 'Library' },
   missing: { id: 'artifactPane.missing', defaultMessage: 'Missing' },
@@ -326,11 +348,13 @@ export function ArtifactPane() {
     artifacts,
     closeTab,
     forgetTrashedFiles,
+    hideRepositoryFiles,
     openFile,
     openArtifact,
     resolveFilePath,
     setActiveTabId,
     setIsOpen,
+    setHideRepositoryFiles,
     setWidth,
     tabs,
     visibleSessionId,
@@ -357,6 +381,11 @@ export function ArtifactPane() {
   );
   const receivedOutputFileExtensionsChange = useRef(false);
   const researchLibraryRevision = useRef(0);
+  const [repositoryClassification, setRepositoryClassification] = useState<{
+    artifacts: typeof artifacts;
+    paths: Set<string>;
+    unavailable: boolean;
+  } | null>(null);
 
   const refreshResearchLibrary = useCallback(
     async (background = false) => {
@@ -454,12 +483,59 @@ export function ArtifactPane() {
     };
   }, []);
 
-  const displayedArtifacts = useMemo(
+  const extensionMatchedArtifacts = useMemo(
     () =>
       artifacts.filter((artifact) =>
         hasDisplayedFileExtension(artifact.displayPath, outputFileExtensions)
       ),
     [artifacts, outputFileExtensions]
+  );
+
+  useEffect(() => {
+    if (!hideRepositoryFiles) return;
+    let cancelled = false;
+    const filePaths = extensionMatchedArtifacts
+      .map((artifact) => artifact.resolvedPath)
+      .filter((filePath) => !isSourceCodeFile(filePath));
+    void (async () => {
+      const paths = new Set<string>();
+      let unavailable = false;
+      for (let offset = 0; offset < filePaths.length; offset += ARTIFACT_REPOSITORY_BATCH_LIMIT) {
+        try {
+          const result = await window.electron.classifyArtifactRepositories(
+            filePaths.slice(offset, offset + ARTIFACT_REPOSITORY_BATCH_LIMIT)
+          );
+          if (cancelled) return;
+          result.repositoryPaths.forEach((filePath) => paths.add(filePath));
+          unavailable ||= result.unavailablePaths.length > 0;
+        } catch {
+          unavailable = true;
+        }
+        if (cancelled) return;
+      }
+      if (!cancelled) {
+        setRepositoryClassification({ artifacts: extensionMatchedArtifacts, paths, unavailable });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [extensionMatchedArtifacts, hideRepositoryFiles]);
+
+  const currentClassification =
+    repositoryClassification?.artifacts === extensionMatchedArtifacts
+      ? repositoryClassification
+      : null;
+  const displayedArtifacts = useMemo(
+    () =>
+      hideRepositoryFiles
+        ? extensionMatchedArtifacts.filter(
+            (artifact) =>
+              !isSourceCodeFile(artifact.resolvedPath) &&
+              !currentClassification?.paths.has(artifact.resolvedPath)
+          )
+        : extensionMatchedArtifacts,
+    [extensionMatchedArtifacts, hideRepositoryFiles, currentClassification]
   );
 
   const titleRequests = useMemo(() => {
@@ -869,10 +945,47 @@ export function ArtifactPane() {
         </div>
       ) : (
         <>
+          <div className="shrink-0 border-b border-border-primary px-3 py-2 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="flex cursor-pointer items-center gap-2">
+                <Switch
+                  variant="mono"
+                  checked={hideRepositoryFiles}
+                  onCheckedChange={setHideRepositoryFiles}
+                  aria-label={intl.formatMessage(i18n.hideRepositoryFiles)}
+                />
+                {intl.formatMessage(i18n.hideRepositoryFiles)}
+              </label>
+              {hideRepositoryFiles && (
+                <span className="text-text-secondary" role="status">
+                  {intl.formatMessage(i18n.repositoryFilesHidden, {
+                    count: extensionMatchedArtifacts.length - displayedArtifacts.length,
+                  })}
+                </span>
+              )}
+            </div>
+            {hideRepositoryFiles && !currentClassification && (
+              <p className="mt-2 text-text-secondary" role="status">
+                {intl.formatMessage(i18n.checkingRepositories)}
+              </p>
+            )}
+            {hideRepositoryFiles && currentClassification?.unavailable && (
+              <p className="mt-2 text-text-secondary" role="status">
+                {intl.formatMessage(i18n.repositoryCheckUnavailable)}
+              </p>
+            )}
+            {hideRepositoryFiles &&
+              extensionMatchedArtifacts.length > 0 &&
+              displayedArtifacts.length === 0 && (
+                <p className="mt-2 text-text-secondary">
+                  {intl.formatMessage(i18n.repositoryFilterEmpty)}
+                </p>
+              )}
+          </div>
           {displayedArtifacts.length > 0 && (
             <div className="max-h-52 shrink-0 overflow-y-auto border-b border-border-primary py-1">
               <ArtifactFileList
-                key={`outputs:${visibleSessionId}`}
+                key={`outputs:${visibleSessionId}:${hideRepositoryFiles}`}
                 label={intl.formatMessage(i18n.outputs)}
                 items={displayedArtifacts.map((artifact) => ({
                   path: artifact.resolvedPath,

@@ -17,6 +17,10 @@ import { expandTilde } from '../utils/pathUtils';
 import { readBoundedSessionImportFile } from '../utils/sessionImport';
 import { documentTitleFromContent, supportsDocumentTitle } from '../utils/documentTitle';
 import { ARTIFACT_TRASH_BATCH_LIMIT, type ArtifactTrashResult } from '../types/artifactTrash';
+import {
+  ARTIFACT_REPOSITORY_BATCH_LIMIT,
+  type ArtifactRepositoryClassification,
+} from '../utils/artifactRepository';
 
 type AssertRendererFileAccess = (webContentsId: number, filePath: string) => Promise<string>;
 type AssertRendererArtifactFileAccess = (
@@ -53,6 +57,7 @@ export const FILE_IPC_CHANNELS = [
   'read-file',
   'read-artifact-file',
   'read-artifact-titles',
+  'classify-artifact-repositories',
   'open-artifact-file',
   'reveal-artifact-file',
   'write-file',
@@ -67,6 +72,29 @@ export const FILE_IPC_CHANNELS = [
   'write-clipboard-html',
   'get-allowed-extensions',
 ] as const;
+
+async function isRepositoryDirectory(
+  directory: string,
+  cache: Map<string, boolean>
+): Promise<boolean> {
+  const cached = cache.get(directory);
+  if (cached !== undefined) return cached;
+  for (const marker of ['.git', '.hg', '.svn']) {
+    try {
+      const stats = await fs.stat(path.join(directory, marker));
+      if (stats.isDirectory() || (marker === '.git' && stats.isFile())) {
+        cache.set(directory, true);
+        return true;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  const parent = path.dirname(directory);
+  const result = parent !== directory && (await isRepositoryDirectory(parent, cache));
+  cache.set(directory, result);
+  return result;
+}
 
 export function registerFileIpcHandlers(
   targetIpcMain: Pick<IpcMain, 'handle'>,
@@ -324,6 +352,37 @@ export function registerFileIpcHandlers(
         }
       }
       return titles;
+    }
+  );
+
+  targetIpcMain.handle(
+    'classify-artifact-repositories',
+    async (event, filePaths: string[]): Promise<ArtifactRepositoryClassification> => {
+      if (
+        !Array.isArray(filePaths) ||
+        filePaths.length > ARTIFACT_REPOSITORY_BATCH_LIMIT ||
+        filePaths.some(
+          (filePath) => typeof filePath !== 'string' || !filePath || filePath.length > 4096
+        )
+      ) {
+        throw new Error('Invalid artifact repository batch');
+      }
+      const result: ArtifactRepositoryClassification = {
+        repositoryPaths: [],
+        unavailablePaths: [],
+      };
+      const directories = new Map<string, boolean>();
+      for (const filePath of new Set(filePaths)) {
+        try {
+          const resolvedPath = await assertRendererArtifactFileAccess(event.sender.id, filePath);
+          if (await isRepositoryDirectory(path.dirname(resolvedPath), directories)) {
+            result.repositoryPaths.push(filePath);
+          }
+        } catch {
+          result.unavailablePaths.push(filePath);
+        }
+      }
+      return result;
     }
   );
 

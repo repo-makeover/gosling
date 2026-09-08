@@ -117,6 +117,70 @@ async function createMainFileIpc() {
 }
 
 describe('live main artifact authorization', () => {
+  it('classifies repository documents, worktrees and missing files without guessing from directory names', async () => {
+    const { invoke, launchRoot } = await createMainFileIpc();
+    const repo = path.join(launchRoot, 'project');
+    const worktree = path.join(launchRoot, 'worktree');
+    const ordinary = path.join(launchRoot, 'src');
+    await fs.mkdir(path.join(repo, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repo, 'docs'));
+    await fs.mkdir(worktree);
+    await fs.writeFile(path.join(worktree, '.git'), 'gitdir: /elsewhere/worktrees/topic');
+    await fs.mkdir(ordinary);
+    const repoDoc = path.join(repo, 'docs', 'README.md');
+    const missingDoc = path.join(repo, 'docs', 'removed.pdf');
+    const worktreeData = path.join(worktree, 'data.json');
+    const ordinaryDoc = path.join(ordinary, 'report.md');
+    await fs.writeFile(repoDoc, '# Repository documentation');
+    await fs.writeFile(worktreeData, '{}');
+    await fs.writeFile(ordinaryDoc, '# Deliverable');
+    expect(
+      await invoke('classify-artifact-repositories', 7, [
+        repoDoc,
+        missingDoc,
+        worktreeData,
+        ordinaryDoc,
+        repoDoc,
+      ])
+    ).toEqual({ repositoryPaths: [repoDoc, missingDoc, worktreeData], unavailablePaths: [] });
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled();
+    expect(shell.openPath).not.toHaveBeenCalled();
+  });
+
+  it('guards repository classification with the exact per-window file capability', async () => {
+    const { invoke, publish, reportPath, outputRoot, launchRoot } = await createMainFileIpc();
+    await fs.mkdir(path.join(outputRoot, '.git'));
+    const sibling = path.join(outputRoot, 'private.md');
+    await fs.writeFile(sibling, 'private');
+    await publish([reportPath]);
+    expect(await invoke('classify-artifact-repositories', 7, [reportPath, sibling])).toEqual({
+      repositoryPaths: [reportPath],
+      unavailablePaths: [sibling],
+    });
+    expect(await invoke('classify-artifact-repositories', 8, [reportPath])).toEqual({
+      repositoryPaths: [],
+      unavailablePaths: [reportPath],
+    });
+    const escaped = path.join(launchRoot, 'escape.md');
+    await fs.symlink(sibling, escaped);
+    expect(await invoke('classify-artifact-repositories', 7, [escaped])).toEqual({
+      repositoryPaths: [],
+      unavailablePaths: [escaped],
+    });
+    expect(await invoke('read-file', 7, reportPath)).toMatchObject({
+      error: expect.stringContaining('outside approved roots'),
+    });
+  });
+
+  it('rejects invalid or oversized repository classification batches', async () => {
+    const { invoke, reportPath } = await createMainFileIpc();
+    for (const request of [null, [12], [''], Array(201).fill(reportPath)]) {
+      await expect(invoke('classify-artifact-repositories', 7, request)).rejects.toThrow(
+        'Invalid artifact repository batch'
+      );
+    }
+  });
+
   it('previews a session document outside launch roots without a picker', async () => {
     const { invoke, publish, reportPath } = await createMainFileIpc();
     expect(await publish([reportPath])).toBe(true);

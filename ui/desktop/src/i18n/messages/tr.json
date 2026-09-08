@@ -3418,5 +3418,20 @@
   },
   "toolApprovalButtons.alwaysAllowRequested": {
     "defaultMessage": "Always Allow requested"
+  },
+  "artifactPane.checkingRepositories": {
+    "defaultMessage": "Checking repository folders…"
+  },
+  "artifactPane.hideRepositoryFiles": {
+    "defaultMessage": "Hide repository files"
+  },
+  "artifactPane.repositoryCheckUnavailable": {
+    "defaultMessage": "Some files could not be checked and remain visible."
+  },
+  "artifactPane.repositoryFilesHidden": {
+    "defaultMessage": "{count} hidden"
+  },
+  "artifactPane.repositoryFilterEmpty": {
+    "defaultMessage": "All matching outputs are hidden by this filter."
   }
 }

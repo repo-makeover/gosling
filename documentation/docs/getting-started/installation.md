@@ -13,8 +13,11 @@ import { PanelLeft } from 'lucide-react';
 
 # Install gosling
 
-:::info v1.0.0 release identity
-This manual is prepared for v1.0.0. The GitHub release, downloaded artifact, and `gosling --version` output are authoritative; do not assume a download is v1.0.0 before the tag and release assets are published.
+:::info Source and download versions
+As of 2026-09-08, the current source/local-build version is `v1.2.2`; see the
+[build notes](../release-notes/v1.2.2.md). A local version bump does not publish
+download assets. Check the [published release](https://github.com/cephalopod-ai/gosling/releases/latest),
+the downloaded artifact, and the installed version before assuming a feature is available.
 :::
 
 After installing the CLI, verify its version:

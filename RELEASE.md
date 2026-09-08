@@ -4,7 +4,9 @@ gosling releases are built and published by GitHub Actions from version tags. Pr
 
 ## Current release target
 
-The current release is **v1.2.1**. Release versions increment the single-digit
+The current source/local-build target is **v1.2.2**; see the
+[local build notes](documentation/docs/release-notes/v1.2.2.md). This version bump
+does not itself publish a release. Release versions increment the single-digit
 patch component and carry at 9: `v1.2.1` through `v1.2.9`, then `v1.3.0`, and
 `v1.9.9` carries to `v2.0.0`.
 
@@ -50,8 +52,8 @@ Use the exact reviewed release commit. Replace `<release-commit>` only after the
 checklist is complete:
 
 ```bash
-git tag -a v1.2.1 <release-commit> -m "gosling v1.2.1"
-git push origin v1.2.1
+git tag -a v1.2.2 <release-commit> -m "gosling v1.2.2"
+git push origin v1.2.2
 ```
 
 Do not move or recreate a published tag to repair an artifact. Fix forward with a new patch version.
