@@ -129,6 +129,14 @@ regression observed in session `20260828_51`. Implementation and installed-app
 evidence are recorded in
 [`docs/logs/session/2026-08-27-auto-permission-persistence.md`](logs/session/2026-08-27-auto-permission-persistence.md).
 
+### Workspace approval regression (2026-09-07)
+
+- [ ] **WDS-GSL-001** — a comment apostrophe merges later shell commands into a
+      false `/dev/null...` mutation target, prompting in Autonomous mode. Source
+      repair and regression cases are prepared; Rust test execution and installed-app
+      verification remain pending. See the
+      [repair record](logs/session/2026-09-07-shell-comment-scope-prompts.md).
+
 ### Remaining Medium decisions and external prerequisites
 
 - [x] **DAT-GSL-002** — workspace deletion preserves workspace-keyed project

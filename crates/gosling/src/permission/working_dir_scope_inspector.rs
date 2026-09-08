@@ -409,6 +409,7 @@ fn split_shell_command(command: &str) -> Vec<String> {
     let mut current = String::new();
     let mut chars = command.chars().peekable();
     let mut quote: Option<char> = None;
+    let mut word_start = true;
     while let Some(character) = chars.next() {
         match quote {
             Some('\'') => {
@@ -430,12 +431,26 @@ fn split_shell_command(command: &str) -> Vec<String> {
             None => match character {
                 '\'' | '"' => {
                     quote = Some(character);
+                    word_start = false;
                     current.push(character);
                 }
                 '\\' => {
                     current.push(character);
                     if let Some(escaped) = chars.next() {
                         current.push(escaped);
+                        if escaped != '\n' {
+                            word_start = false;
+                        }
+                    }
+                }
+                '#' if word_start => {
+                    // Quotes in comments must not absorb subsequent commands.
+                    for character in chars.by_ref() {
+                        if character == '\n' {
+                            segments.push(std::mem::take(&mut current));
+                            word_start = true;
+                            break;
+                        }
                     }
                 }
                 ';' | '\n' | '|' => {
@@ -443,12 +458,17 @@ fn split_shell_command(command: &str) -> Vec<String> {
                         chars.next();
                     }
                     segments.push(std::mem::take(&mut current));
+                    word_start = true;
                 }
                 '&' if chars.peek() == Some(&'&') => {
                     chars.next();
                     segments.push(std::mem::take(&mut current));
+                    word_start = true;
                 }
-                _ => current.push(character),
+                _ => {
+                    word_start = matches!(character, ' ' | '\t');
+                    current.push(character);
+                }
             },
         }
     }
@@ -1688,6 +1708,107 @@ mod tests {
                 Some(expected.as_path()),
                 "{command}"
             );
+        }
+    }
+
+    #[test]
+    fn shell_comments_do_not_change_command_boundaries() {
+        for comment in [
+            "# launchd's activation API",
+            "# unmatched \"quote; | && > /outside/comment.txt",
+            "# escaped newline stays in the comment \\",
+        ] {
+            assert_eq!(
+                shell_segments(&format!("{comment}\nprintf ok >/dev/null\nls")),
+                vec![vec!["printf", "ok", ">/dev/null"], vec!["ls"]],
+                "{comment}"
+            );
+            assert_eq!(
+                shell_segments(&format!("printf ok {comment}\nls")),
+                vec![vec!["printf", "ok"], vec!["ls"]],
+                "{comment}"
+            );
+        }
+        assert_eq!(
+            shell_segments("printf ok # trailing unmatched '\""),
+            vec![vec!["printf", "ok"]]
+        );
+        assert_eq!(
+            shell_segments("true;# unmatched '\nls &&# unmatched \"\npwd"),
+            vec![vec!["true"], vec!["ls"], vec!["pwd"]]
+        );
+    }
+
+    #[test]
+    fn literal_hashes_and_line_continuations_remain_arguments() {
+        for argument in [
+            "path#fragment",
+            "'literal # hash'",
+            "\"literal # hash\"",
+            "'two\n# literal lines'",
+            "\\#escaped",
+            "word\\ #suffix",
+            "word\\\n#suffix",
+            "''#suffix",
+            "word\u{00a0}#suffix",
+        ] {
+            let command = format!("printf %s {argument}");
+            assert_eq!(split_shell_command(&command), vec![command]);
+        }
+        assert_eq!(
+            shell_segments("printf ok \\\n# unmatched '\nls"),
+            vec![vec!["printf", "ok"], vec!["ls"]]
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_session_does_not_prompt_after_heredoc_comment() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let session_manager = Arc::new(SessionManager::new(root.path().to_path_buf()));
+        let session = workspace_session(&session_manager, &project).await;
+        let inspector = WorkingDirScopeInspector::new(session_manager);
+        let command = "set -eu\npython3 - <<'PY'\n\
+            # Dedicated test uses launchd's real activation API.\n\
+            print('ready')\nPY\n\
+            curl --fail --max-time 10 -sS http://127.0.0.1:18998/ >/dev/null\n\
+            launchctl print gui/$(id -u)/local.mac-demand.test | grep -E 'state =|pid =|runs ='";
+        let outside = root.path().join("outside.txt");
+        let results = inspector
+            .inspect(
+                &session.id,
+                &[
+                    shell_request("diagnostic", command),
+                    shell_request(
+                        "real-write",
+                        &format!("{command}\nprintf x > '{}'", outside.display()),
+                    ),
+                    shell_request(
+                        "write-after-comment",
+                        &format!(
+                            "# don't skip the next command\nprintf x > '{}'",
+                            outside.display()
+                        ),
+                    ),
+                ],
+                &[],
+                GoslingMode::Auto,
+            )
+            .await
+            .unwrap();
+        let flagged: Vec<&str> = results
+            .iter()
+            .map(|result| result.tool_request_id.as_str())
+            .collect();
+        assert_eq!(flagged, vec!["real-write", "write-after-comment"]);
+        for result in results {
+            match result.action {
+                InspectionAction::RequireApproval(Some(message)) => {
+                    assert!(message.contains(outside.to_str().unwrap()), "{message}");
+                }
+                other => panic!("expected approval for the actual write, got {other:?}"),
+            }
         }
     }
 
