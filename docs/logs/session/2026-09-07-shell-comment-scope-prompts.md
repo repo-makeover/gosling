@@ -162,3 +162,21 @@ is unchanged; no application build, packaging, installation, restart or replay
 of host-changing commands occurred. Tests compiled as authorized. This is scoped
 permission-workflow validation and two reviews by the implementing agent, not
 an independent or repository-wide clean-security verdict.
+
+## Authorized GUI reinstall follow-up (2026-09-07)
+
+The operator subsequently authorized building and reinstalling the GUI, without
+creating an application backup. Built committed repairs at `cb1aac7ed` using
+the repository Hermit toolchain, locked release CLI/backend build, Desktop
+packaging and documented ad-hoc signing entitlements. Installed Gosling 1.2.1
+at `/Applications/Gosling.app` after quitting the old app and verifying that its
+processes had exited. No application backup was created.
+
+Release/package/installed backend hashes match, as do packaged/installed GUI
+payload hashes. Deep/strict signature verification passes and the installed
+backend reports 1.2.1. Startup of the new GUI is waiting in macOS Keychain access;
+Computer Use refuses SecurityAgent interaction, so visible window acceptance
+requires the operator to complete that system prompt. Build and reinstall are
+complete; GUI startup is only partially verified. Exact commands, hashes and
+diagnostic limits are in the
+[repair/install report](../../cloud/2026-09-07-permissions-repair.md).

@@ -260,3 +260,61 @@ defects and tested adjacent syntax; this report does not claim universal shell
 or OS-level isolation. Genuine workspace/security requests can still require
 approval under the existing policy. Installing these repairs is a later task
 under the operator's build restriction.
+
+## Authorized GUI build and reinstall follow-up
+
+The operator subsequently authorized building and reinstalling the Gosling GUI,
+explicitly requesting **no application backup**. This supersedes the earlier
+build/install restriction for this follow-up. Source baseline is clean `main`
+at `cb1aac7ed`, containing the seven repairs. Target: macOS arm64,
+`/Applications/Gosling.app`; existing bundle ID `com.electron.gosling`.
+
+Execution uses catalog `plan-rust-app` for the existing Rust build boundary and
+the repository's Electron packaging commands. Hermit supplies Rust 1.92.0,
+Node 24.10.0 and pnpm 10.30.3. Plan: compile the release CLI/backend with default
+features and the locked dependency graph, stage it using `just copy-binary`,
+package the GUI, apply the documented local ad-hoc signing entitlements, then
+quit, replace and launch the installed app. These stages are sequential because
+the package consumes the compiled backend and installation consumes the verified
+package. Cargo's existing target cache allows build resumption. No previous
+application bundle will be retained or renamed as a backup.
+
+Checkpoint: backend build started with
+`./scripts/with-rusty-v8-cache.sh cargo build --locked --release -p gosling-cli --bin gosling`.
+Build log: `/tmp/gosling-permission-install-backend.log`. Final acceptance will
+verify signing, installed/backend payload equality, backend version and the
+installed GUI's visible startup. Installation has not occurred at this checkpoint.
+
+Packaging checkpoint: release backend succeeded in 2m 38s; `just copy-binary`
+and `pnpm --dir ui/desktop run package` succeeded. The documented
+`codesign --force --deep --sign - --entitlements ui/desktop/entitlements.plist`
+signing step and deep/strict verification passed. Bundle version is 1.2.1 with
+the existing bundle identifier. Release, staging and packaged backend SHA-256
+all equal `b419c384f54625113108d9a2611bf123f12f85c3177a6be718c4ca59423f8f2c`.
+Only this record changed in the tracked source tree during packaging.
+
+Installation checkpoint: the application was quit through its native Quit menu;
+all processes under the installed bundle exited before replacement. The new
+bundle was staged and signature-verified, the old `/Applications/Gosling.app`
+was removed, and the new bundle moved into that path. **No application backup
+was created.** Installed deep/strict signature verification passed. Installed
+backend SHA-256 matches the release/package value above; installed `app.asar`
+matches the package at
+`46cf2957eac0ddbd5f6cde8e277907b03056fabe2d9e67b798a1b79d9322b4f1`.
+The installed backend reports 1.2.1.
+
+Acceptance limit: the new installed GUI process launches, but window inspection
+times out. A one-second process sample shows its main thread waiting in macOS
+`SecItemCopyMatching` / SecurityServer while `SecurityAgent` is running.
+Computer Use explicitly refuses access to `com.apple.SecurityAgent` for safety.
+The system Keychain interaction must be completed by the operator; no credential
+was retrieved, changed or entered, and no Keychain access control was bypassed.
+**Build and reinstall complete; visible GUI startup verification pending the
+macOS Keychain interaction.** The prior installed-app-pending repair status is
+superseded only to this extent; a live permission-command replay was not run.
+
+Build/package/signature logs are retained under
+`/tmp/gosling-permission-install-{backend,sdk,package,sign}.log`; the diagnostic
+sample is `/tmp/gosling-permission-install-startup-sample.txt`. No runtime source,
+dependency lockfile, application settings or session data was changed during
+the installation follow-up.
