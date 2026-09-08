@@ -2,8 +2,8 @@
  * Owns renderer directory grants, artifact grants, and artifact-routing validation.
  *
  * Extracted from ui/desktop/src/main.ts during behavior-preserving modularization.
- * The Electron entrypoint remains the compatibility facade and delegates every
- * renderer filesystem authorization decision to this controller.
+ * The current Electron entrypoint retains its own authorization wiring in main.ts.
+ * Changes to this controller alone do not change the running Desktop's file access.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';

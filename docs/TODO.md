@@ -1,5 +1,18 @@
 # TODO
 
+## 2026-09-08 recurring output-preview repair
+
+- [x] **ART-PREVIEW-001** — Restore the live Desktop entrypoint's use of validated
+      session document capabilities so Outputs previews do not demand a second
+      native picker grant. Six live-entrypoint regression cases, all 1,166 Desktop
+      tests, and the original document in the reinstalled application passed;
+      see the [repair and installation evidence](logs/session/2026-08-28-artifact-preview-follow-up-repair.md#recurring-preview-denial-investigation-2026-09-08).
+
+The older audit entries below remain historical findings. The current
+ADR-0006/0013 contract permits transient, validated exact-file deliverable
+capabilities; it does not grant their parent directories. This repair restores
+that documented behavior without broadening the existing eligibility filter.
+
 ## Open items from the 2026-08-26 clean independent audit
 
 Source: [`docs/cloud/2026-08-26-clean-independent-audit.md`](cloud/2026-08-26-clean-independent-audit.md).

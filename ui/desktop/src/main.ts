@@ -257,6 +257,7 @@ async function assertRendererArtifactFileAccess(
 ): Promise<string> {
   const routingConfig = artifactRoutingRegistry.get(webContentsId);
   const routedOutputRoots = routingConfig?.outputs.map((output) => output.path) ?? [];
+  const routedArtifactFiles = routingConfig?.artifactFiles ?? [];
   const expandedPath = expandTilde(filePath);
   const candidatePath = path.isAbsolute(expandedPath) ? resolveRendererPath(filePath) : filePath;
   return assertArtifactFileAccess(
@@ -264,7 +265,8 @@ async function assertRendererArtifactFileAccess(
     baseDirectory ? resolveRendererPath(baseDirectory) : undefined,
     rendererFileRoots(webContentsId),
     routedOutputRoots,
-    rendererArtifactFileGrants.get(webContentsId) ?? new Set()
+    // Session capabilities stay in the current routing config so switching sessions revokes them.
+    new Set([...(rendererArtifactFileGrants.get(webContentsId) ?? []), ...routedArtifactFiles])
   );
 }
 

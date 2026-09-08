@@ -129,8 +129,10 @@ whose MIME type or extension maps to a preview compatible with the file reader. 
 active selection are separate, session-scoped user state. Listing an artifact never opens the pane,
 reads a file, creates an output folder, copies a file, or grants access. Selection still traverses the
 Electron file guard, so only
-renderer directory grants, validated workspace output roots, and explicit picker grants can be read,
-revealed, copied, or opened externally.
+renderer directory grants, validated workspace output roots, explicit picker grants, and the exact
+session deliverable capabilities defined by ADR-0006/0013 authorize reads, reveal, copy, or external
+opening. Session capabilities are taken from the current window's validated routing configuration;
+they are not retained as directory grants or as permanent picker grants.
 
 ## Error taxonomy
 

@@ -64,3 +64,85 @@ Repair two regressions observed in Deep Research session `20260828_51`:
   the preview click-through and a path-only follow-up remain partial live checks.
 
 Final status: `completed_with_partial_verification`
+
+## Recurring preview denial investigation (2026-09-08)
+
+Source observation ART-PREVIEW-001: the operator's screenshot shows
+`muninn-sync-repair-plan-2026-09-08.md` in the Outputs pane, but selecting it
+requires a native file-picker grant. This is P1 Desktop correctness, localized
+to the live Electron artifact authorization path. Intake: clean `main` at
+`86ed0badb`, macOS arm64, installed Gosling 1.2.1.
+
+Using catalog `repair-defect-patchset` and its playtest/contract/closure guidance,
+with the screenshot as the supplied finding. Existing user authorization covers
+repair/testing; the earlier no-application-backup preference remains in force.
+Independent reads/checks are batched; edits, validation and packaging remain
+dependent stages. This entry is the durable checkpoint.
+
+The renderer publishes document-like session artifacts, and the main process
+validates/canonicalizes them into routing configuration. However,
+`main.ts::assertRendererArtifactFileAccess` omits `routingConfig.artifactFiles`
+when calling the file guard. `main/rendererAccess.ts` contains the correct union
+but is not imported by the live entrypoint. Existing controller/helper tests
+therefore miss the integration failure. ADR-0006 and ADR-0013 already authorize
+these transient exact-file capabilities; the repair restores that contract.
+
+Baseline: 43 focused Desktop artifact/main tests and typecheck passed. A new
+integration test executes the actual `main.ts` authorization functions and IPC
+registration with temporary files, without Electron startup or user settings.
+Before the fix, three cases failed with the screenshot's exact "outside approved
+roots" error; three denial/control cases passed. With the fix, all six pass.
+
+The runtime patch adds the current routing configuration's validated exact-file
+capabilities to the artifact guard. It does not persist them as picker or
+directory grants. The unused controller's misleading header now identifies the
+live entrypoint, and the architecture paragraph matches the existing ADR policy.
+No cross-file authorization refactor was performed.
+
+### Review and validation
+
+- Adversarial self-review: traced the renderer's existing deliverable filter,
+  main-process canonicalization, actual IPC dependency injection, routing
+  revision protection and window cleanup. Regression cases preserve neighboring
+  file, other-window and generic-read denials; reject source/directory
+  capabilities and a retargeted symlink; and exercise routing replacement/clear.
+- Distinct completeness self-review: checked the screenshot's path against the
+  read-only session inventory (`20260906_50`, `created`, `built_in_tool`), confirmed
+  the file exists, and reconciled the runtime path, ADR-0006/0013, earlier repair
+  record and TODO closure. These are self-review passes, not an independent audit.
+- Focused Desktop suite: **49/49 tests, 9 files passed**.
+- Complete Desktop suite (`pnpm --dir ui/desktop test:run`): **1,166/1,166 tests,
+  153 files passed**.
+- Desktop typecheck, targeted ESLint with zero warnings, targeted Prettier check,
+  `cargo fmt --all -- --check`, and `git diff --check`: passed.
+- `just copy-binary` and `pnpm --dir ui/desktop run package`: passed. The unchanged
+  Rust sidecar was reused; no Rust runtime source changed in this repair.
+- Build/test evidence: `/tmp/gosling-artifact-{red,green,full-desktop,typecheck,eslint,prettier,rustfmt,package}.log`.
+
+### Installed application and original-scenario retest
+
+- Installed `/Applications/Gosling.app`, version 1.2.1, bundle identifier
+  `com.electron.gosling`; packaged and installed deep/strict signature checks pass.
+- Packaged and installed `app.asar` SHA-256:
+  `32be11edd1e1ad4ec091e59d5460b636638e70f8962e376bf74ae4bb1e40fbca`.
+- Packaged and installed sidecar SHA-256:
+  `b419c384f54625113108d9a2611bf123f12f85c3177a6be718c4ca59423f8f2c`;
+  identical to the previously installed sidecar.
+- Quit the idle application normally before replacing it. No application backup
+  was created. A delete-and-copy command was rejected before execution; used
+  `ditto` over the existing bundle after confirming no old-only bundle files,
+  then verified the installed signature and hashes.
+- Initial ScreenCaptureKit failures were overcome by reconnecting Computer Use;
+  native accessibility inspection then reproduced the denial in the old app.
+  This retest used actual UI interactions, not direct IPC invocation.
+- After reinstall, opening "this is a macos" automatically restored the selected
+  `/Users/eric/Documents/muninn-sync-repair-plan-2026-09-08.md` and rendered its
+  heading, metadata and plan sections. No "Preview unavailable", file access
+  denial or grant-picker button was present. No file-picker approval was given.
+- Switched to another chat and back, then clicked the same Outputs entry directly;
+  the report remained readable. The application is left on that preview.
+
+ART-PREVIEW-001: **closed — source regression, full Desktop suite and installed
+original-scenario retest passed**. This supersedes the August 28 partial live
+verification for this preview defect; it makes no new claim about the separate
+Deep Research completion scenario or unrelated OS/tool permission prompts.
