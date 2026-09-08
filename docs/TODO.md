@@ -1,5 +1,15 @@
 # TODO
 
+## 2026-09-08 confirmation dialog layering
+
+- [x] **MODAL-LAYER-001** — Put shared dialogs and their backdrops above the
+      Outputs pane, retaining visible dropdowns and tooltips inside dialogs.
+      Long confirmation content scrolls while action buttons remain visible.
+      All 36 focused tests, Desktop typecheck, scoped lint/format checks, and
+      the renderer build passed. Browser checks covered normal and compact
+      windows. See the [repair record](logs/session/2026-09-08-modal-layering.md).
+      Source validated; installed-app replacement is pending the next build/install step.
+
 ## 2026-09-08 temporary scratch approvals
 
 - [x] **WDS-TMP-001** — Allow ordinary temporary scratch paths in unrestricted workspace
