@@ -318,3 +318,12 @@ Build/package/signature logs are retained under
 sample is `/tmp/gosling-permission-install-startup-sample.txt`. No runtime source,
 dependency lockfile, application settings or session data was changed during
 the installation follow-up.
+
+Startup retry (2026-09-08): the operator requested another attempt. Opening
+`/Applications/Gosling.app` now succeeds. The installed GUI visibly loads its
+workspace list, model selector and new-chat controls; its embedded backend and
+renderer processes are running from the installed bundle. The backend reports
+1.2.1. **Build, reinstall and visible startup verification are complete.** The
+earlier Keychain startup blocker is no longer present on this attempt. No
+SecurityAgent interaction, credential change or application backup occurred.
+This verifies startup, not a live host-changing permission-command replay.

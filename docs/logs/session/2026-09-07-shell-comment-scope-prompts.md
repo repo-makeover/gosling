@@ -180,3 +180,12 @@ requires the operator to complete that system prompt. Build and reinstall are
 complete; GUI startup is only partially verified. Exact commands, hashes and
 diagnostic limits are in the
 [repair/install report](../../cloud/2026-09-07-permissions-repair.md).
+
+### Successful startup retry (2026-09-08)
+
+On the operator's retry request, the installed Gosling GUI opened successfully
+with the workspace list, model selector and chat controls visible. The GUI,
+renderer and embedded backend run from `/Applications/Gosling.app`; the backend
+reports 1.2.1. This closes the pending visible startup check. No Keychain access
+control was changed and no application backup was created. No live tool request
+was submitted. The repair/install report records the same updated disposition.
