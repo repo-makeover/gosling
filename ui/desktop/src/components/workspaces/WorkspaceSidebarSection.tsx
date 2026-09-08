@@ -12,6 +12,7 @@ import { toast } from 'react-toastify';
 import { acpExportWorkspace } from '../../acp/workspaces';
 import { useArtifactRouter } from '../../contexts/ArtifactRouterContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
+import { defineMessages, useIntl } from '../../i18n';
 import { cn } from '../../utils';
 import { workspaceErrorMessage } from '../../utils/workspaceError';
 import {
@@ -24,11 +25,22 @@ import { WorkspaceEditorDialog } from './WorkspaceEditorDialog';
 
 const COLLAPSED_KEY = 'workspaces_sidebar_collapsed';
 
+const i18n = defineMessages({
+  chatReady: {
+    id: 'workspaceSidebar.chatReady',
+    defaultMessage: 'A chat in this workspace has a new reply',
+  },
+});
+
 interface WorkspaceSidebarSectionProps {
   onNewChat(workspaceId: string): void;
+  readyWorkspaceIds: ReadonlySet<string>;
 }
 
-export function WorkspaceSidebarSection({ onNewChat }: WorkspaceSidebarSectionProps) {
+export function WorkspaceSidebarSection({
+  onNewChat,
+  readyWorkspaceIds,
+}: WorkspaceSidebarSectionProps) {
   const { saveArtifact } = useArtifactRouter();
   const {
     workspaces,
@@ -170,6 +182,7 @@ export function WorkspaceSidebarSection({ onNewChat }: WorkspaceSidebarSectionPr
                   item={item}
                   filtered={item.workspace.id === sessionWorkspaceFilterId}
                   isDefault={item.workspace.id === defaultWorkspaceId}
+                  hasReadyChat={readyWorkspaceIds.has(item.workspace.id)}
                   onFilter={() => setSessionWorkspaceFilterId(item.workspace.id)}
                   onNewChat={() => onNewChat(item.workspace.id)}
                   onEdit={() => setEditor({ open: true, workspace: item.workspace })}
@@ -247,6 +260,7 @@ function WorkspaceRow({
   item,
   filtered,
   isDefault,
+  hasReadyChat,
   onFilter,
   onNewChat,
   onEdit,
@@ -258,6 +272,7 @@ function WorkspaceRow({
   item: WorkspaceWithValidation;
   filtered: boolean;
   isDefault: boolean;
+  hasReadyChat: boolean;
   onFilter(): void;
   onNewChat(): void;
   onEdit(): void;
@@ -266,6 +281,7 @@ function WorkspaceRow({
   onExport(): void;
   onDelete(): void;
 }) {
+  const intl = useIntl();
   const { workspace, validation } = item;
   const hasWarnings = (validation.issues ?? []).length > 0;
   const warningSummary = (validation.issues ?? []).map((issue) => issue.message).join('; ');
@@ -281,6 +297,14 @@ function WorkspaceRow({
         <span className="flex size-5 items-center justify-center rounded bg-background-tertiary text-[10px] font-semibold uppercase">
           {(workspace.icon || workspace.name).slice(0, 2)}
         </span>
+        {hasReadyChat && (
+          <span
+            role="img"
+            className="size-2 shrink-0 rounded-full bg-green-500"
+            aria-label={intl.formatMessage(i18n.chatReady)}
+            title={intl.formatMessage(i18n.chatReady)}
+          />
+        )}
         <span className="min-w-0 flex-1 text-left">
           <span className="block truncate">{workspace.name}</span>
           <span className="block truncate text-[10px] text-text-secondary">

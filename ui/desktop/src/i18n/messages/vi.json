@@ -3448,5 +3448,8 @@
   },
   "artifactFiles.unknownTime": {
     "defaultMessage": "Unavailable"
+  },
+  "workspaceSidebar.chatReady": {
+    "defaultMessage": "A chat in this workspace has a new reply"
   }
 }

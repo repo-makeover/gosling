@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IntlTestWrapper } from '../../i18n/test-utils';
 import { useNavigationContext } from './NavigationContext';
+import { AppEvents } from '../../constants/events';
 import { useNavigationSessions } from '../../hooks/useNavigationSessions';
 import { Navigation } from './NavigationPanel';
 
@@ -19,7 +20,14 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('../workspaces/WorkspaceSidebarSection', () => ({
-  WorkspaceSidebarSection: () => <div data-testid="workspaces">Workspaces</div>,
+  WorkspaceSidebarSection: ({ readyWorkspaceIds }: { readyWorkspaceIds: ReadonlySet<string> }) => (
+    <div data-testid="workspaces">
+      Workspaces
+      {[...readyWorkspaceIds].map((id) => (
+        <span key={id}>Ready workspace: {id}</span>
+      ))}
+    </div>
+  ),
 }));
 
 const WORKSPACES_HEIGHT_KEY = 'workspaces_sidebar_height';
@@ -136,5 +144,123 @@ describe('NavigationPanel workspaces/chats divider', () => {
     expect(pane.style.height).toBe('');
     expect(pane.className).toContain('max-h-[45%]');
     expect(window.localStorage.getItem(WORKSPACES_HEIGHT_KEY)).toBeNull();
+  });
+});
+
+describe('NavigationPanel workspace readiness', () => {
+  const onSessionClick = vi.fn();
+  const firstSession = {
+    id: 'math-1',
+    workspaceId: 'math',
+    name: 'First math chat',
+    workingDir: '/math',
+    createdAt: '2026-09-08T10:00:00Z',
+    updatedAt: '',
+    messageCount: 2,
+  };
+  const secondSession = { ...firstSession, id: 'math-2', name: 'Second math chat' };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    vi.mocked(useNavigationContext).mockReturnValue({
+      isNavExpanded: true,
+      setIsNavExpanded: vi.fn(),
+    });
+    vi.mocked(useNavigationSessions).mockReturnValue({
+      recentSessions: [],
+      activeSessionId: undefined,
+      fetchSessions: vi.fn(),
+      handleNavClick: vi.fn(),
+      handleSessionClick: onSessionClick,
+    });
+  });
+
+  const renderPanel = () => render(<Navigation />, { wrapper: IntlTestWrapper });
+  const status = (sessionId: string, workspaceId: string | null, streamState: string) =>
+    fireEvent(
+      window,
+      new CustomEvent(AppEvents.SESSION_STATUS_UPDATE, {
+        detail: { sessionId, workspaceId, streamState },
+      })
+    );
+  const finishChat = (sessionId: string, workspaceId: string | null) => {
+    status(sessionId, workspaceId, 'streaming');
+    status(sessionId, workspaceId, 'idle');
+  };
+
+  it('keeps a completed chat workspace ready outside the filtered recent list and collapsed chats', () => {
+    renderPanel();
+    status('math-1', 'math', 'idle');
+    expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+    status('math-1', 'math', 'streaming');
+    expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+    status('math-1', 'math', 'idle');
+    expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Chats' }));
+    expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
+  });
+
+  it('clears the workspace only after its last ready chat is opened and preserves the chat dots', () => {
+    const context = vi.mocked(useNavigationSessions)();
+    vi.mocked(useNavigationSessions).mockReturnValue({
+      ...context,
+      recentSessions: [firstSession, secondSession],
+    });
+    const { rerender } = renderPanel();
+    finishChat('math-1', 'math');
+    finishChat('math-2', 'math');
+    expect(screen.getAllByLabelText('Has new activity')).toHaveLength(2);
+
+    vi.mocked(useNavigationSessions).mockReturnValue({ ...context, recentSessions: [] });
+    rerender(<Navigation />);
+    expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
+    vi.mocked(useNavigationSessions).mockReturnValue({
+      ...context,
+      recentSessions: [firstSession, secondSession],
+    });
+    rerender(<Navigation />);
+
+    fireEvent.click(screen.getByText('First math chat'));
+    expect(onSessionClick).toHaveBeenCalledWith('math-1');
+    expect(screen.getAllByLabelText('Has new activity')).toHaveLength(1);
+    expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Second math chat'));
+    expect(screen.queryByLabelText('Has new activity')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+  });
+
+  it('excludes error and streaming chats but keeps other ready chats in that workspace', () => {
+    renderPanel();
+    finishChat('math-1', 'math');
+    status('math-1', 'math', 'streaming');
+    expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+    status('math-1', 'math', 'error');
+    expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+    finishChat('math-2', 'math');
+    expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
+    finishChat('physics-1', 'physics');
+    expect(screen.getByText('Ready workspace: physics')).toBeInTheDocument();
+  });
+
+  it.each([AppEvents.SESSION_ARCHIVED, AppEvents.SESSION_DELETED])(
+    'removes readiness when the chat is %s',
+    (eventName) => {
+      renderPanel();
+      finishChat('math-1', 'math');
+      finishChat('math-2', 'math');
+      fireEvent(window, new CustomEvent(eventName, { detail: { sessionId: 'math-1' } }));
+      expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
+      fireEvent(window, new CustomEvent(eventName, { detail: { sessionId: 'math-2' } }));
+      expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+    }
+  );
+
+  it('does not assign an unassigned chat to a workspace, and updates when its metadata arrives', () => {
+    renderPanel();
+    finishChat('math-1', null);
+    expect(screen.getByTestId('workspaces')).toHaveTextContent(/^Workspaces$/);
+    status('math-1', 'math', 'idle');
+    expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
   });
 });

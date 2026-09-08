@@ -244,12 +244,13 @@ export default function BaseChat({
       new CustomEvent(AppEvents.SESSION_STATUS_UPDATE, {
         detail: {
           sessionId,
+          workspaceId: session?.workspace_id ?? null,
           streamState,
           messageCount: messages.length,
         },
       })
     );
-  }, [sessionId, chatState, messages.length, promptError, sessionLoadError]);
+  }, [sessionId, session?.workspace_id, chatState, messages.length, promptError, sessionLoadError]);
 
   // Generate command history from user messages (most recent first)
   const commandHistory = useMemo(() => {

@@ -3448,5 +3448,8 @@
   },
   "workingDirectoriesMenu.workspaceSessionOnlyHint": {
     "defaultMessage": "Workspace folders remain pinned. Directories added here belong only to this session; other sessions and the workspace do not receive access."
+  },
+  "workspaceSidebar.chatReady": {
+    "defaultMessage": "A chat in this workspace has a new reply"
   }
 }

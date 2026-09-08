@@ -36,6 +36,11 @@ Open the sidebar and expand **Workspaces**.
 Filtering workspaces does not move or restart the chat currently on screen and does not change
 future-chat defaults. The chat header continues to show the session's pinned workspace.
 
+A green dot beside a workspace means at least one of its chats has a new reply, matching the
+green dot on the chat itself. It remains visible when you filter to another workspace or collapse
+the Chats list. Selecting a workspace only filters the list; open each ready chat from the sidebar
+to clear its indicator. The workspace dot clears after the last ready chat is opened, archived, or deleted.
+
 The chat composer also exposes a credential-profile control. In New Chat, use it to choose from
 available profiles or open **Manage credential profiles**. In an existing chat, it identifies the
 pinned profile and keeps a deleted or unavailable profile visible as a relink problem; it does not

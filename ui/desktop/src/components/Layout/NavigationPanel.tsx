@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronRight, MoreHorizontal } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -40,6 +40,7 @@ import { WorkspaceSidebarSection } from '../workspaces/WorkspaceSidebarSection';
 type StreamState = 'idle' | 'loading' | 'streaming' | 'error';
 
 interface SessionStatus {
+  workspaceId: string | null;
   streamState: StreamState;
   hasUnreadActivity: boolean;
 }
@@ -275,6 +276,21 @@ export const Navigation: React.FC<{ className?: string }> = ({ className }) => {
     useNavigationSessions();
 
   const [sessionStatuses, setSessionStatuses] = useState<Map<string, SessionStatus>>(new Map());
+  const readyWorkspaceIds = useMemo(
+    () =>
+      new Set(
+        [...sessionStatuses.values()]
+          .filter(
+            (status) =>
+              status.hasUnreadActivity &&
+              status.streamState !== 'streaming' &&
+              status.streamState !== 'error'
+          )
+          .map((status) => status.workspaceId)
+          .filter((workspaceId): workspaceId is string => workspaceId !== null)
+      ),
+    [sessionStatuses]
+  );
   const [renameRequest, setRenameRequest] = useState<{ sessionId: string; token: number } | null>(
     null
   );
@@ -290,12 +306,19 @@ export const Navigation: React.FC<{ className?: string }> = ({ className }) => {
 
   useEffect(() => {
     const handleStatusUpdate = (event: Event) => {
-      const { sessionId, streamState } = (event as CustomEvent).detail;
+      const { sessionId, workspaceId, streamState } = (
+        event as CustomEvent<{
+          sessionId: string;
+          workspaceId: string | null;
+          streamState: StreamState;
+        }>
+      ).detail;
       setSessionStatuses((prev) => {
         const existing = prev.get(sessionId);
         const shouldMarkUnread = existing?.streamState === 'streaming' && streamState === 'idle';
         const next = new Map(prev);
         next.set(sessionId, {
+          workspaceId,
           streamState,
           hasUnreadActivity: existing?.hasUnreadActivity || shouldMarkUnread,
         });
@@ -303,8 +326,23 @@ export const Navigation: React.FC<{ className?: string }> = ({ className }) => {
       });
     };
 
+    const handleSessionRemoved = (event: Event) => {
+      const { sessionId } = (event as CustomEvent<{ sessionId: string }>).detail;
+      setSessionStatuses((prev) => {
+        const next = new Map(prev);
+        next.delete(sessionId);
+        return next;
+      });
+    };
+
     window.addEventListener(AppEvents.SESSION_STATUS_UPDATE, handleStatusUpdate);
-    return () => window.removeEventListener(AppEvents.SESSION_STATUS_UPDATE, handleStatusUpdate);
+    window.addEventListener(AppEvents.SESSION_ARCHIVED, handleSessionRemoved);
+    window.addEventListener(AppEvents.SESSION_DELETED, handleSessionRemoved);
+    return () => {
+      window.removeEventListener(AppEvents.SESSION_STATUS_UPDATE, handleStatusUpdate);
+      window.removeEventListener(AppEvents.SESSION_ARCHIVED, handleSessionRemoved);
+      window.removeEventListener(AppEvents.SESSION_DELETED, handleSessionRemoved);
+    };
   }, []);
 
   const clearUnread = useCallback((sessionId: string) => {
@@ -547,6 +585,7 @@ export const Navigation: React.FC<{ className?: string }> = ({ className }) => {
         style={workspacesHeight === null ? undefined : { height: workspacesHeight }}
       >
         <WorkspaceSidebarSection
+          readyWorkspaceIds={readyWorkspaceIds}
           onNewChat={(workspaceId) => navigate('/', { state: { initialWorkspaceId: workspaceId } })}
         />
       </div>

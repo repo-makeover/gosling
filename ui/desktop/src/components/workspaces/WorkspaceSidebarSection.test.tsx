@@ -1,10 +1,11 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { acpExportWorkspace } from '../../acp/workspaces';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 import { useArtifactRouter } from '../../contexts/ArtifactRouterContext';
 import { WorkspaceSidebarSection } from './WorkspaceSidebarSection';
+import { IntlTestWrapper } from '../../i18n/test-utils';
 
 vi.mock('../../acp/workspaces', () => ({
   acpExportWorkspace: vi.fn(),
@@ -98,7 +99,9 @@ describe('WorkspaceSidebarSection', () => {
   });
 
   it('renders the active workspace and its actionable warning accessibly', () => {
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} />);
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+      wrapper: IntlTestWrapper,
+    });
 
     expect(screen.getByText('Workspaces')).toBeInTheDocument();
     expect(
@@ -109,8 +112,48 @@ describe('WorkspaceSidebarSection', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the ready dot on the matching workspace even when another workspace is selected', () => {
+    const context = vi.mocked(useWorkspace)();
+    vi.mocked(useWorkspace).mockReturnValue({
+      ...context,
+      sessionWorkspaceFilterId: 'workspace-2',
+      workspaces: [
+        ...context.workspaces,
+        {
+          ...context.workspaces[0],
+          workspace: { ...workspace, id: 'workspace-2', name: 'Physics' },
+        },
+      ],
+    });
+    const { rerender } = render(
+      <WorkspaceSidebarSection
+        onNewChat={startNewChat}
+        readyWorkspaceIds={new Set([workspace.id])}
+      />,
+      { wrapper: IntlTestWrapper }
+    );
+    const row = screen.getByRole('button', { name: 'Annual Meeting' });
+    const readyLabel = 'A chat in this workspace has a new reply';
+    expect(within(row).getByRole('img', { name: readyLabel })).toHaveAttribute('title', readyLabel);
+    expect(
+      within(screen.getByRole('button', { name: 'Physics, chat filter active' })).queryByRole(
+        'img',
+        { name: readyLabel }
+      )
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(row);
+    expect(setSessionWorkspaceFilterId).toHaveBeenCalledWith(workspace.id);
+    expect(within(row).getByRole('img', { name: readyLabel })).toBeInTheDocument();
+
+    rerender(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />);
+    expect(screen.queryByRole('img', { name: readyLabel })).not.toBeInTheDocument();
+  });
+
   it('opens the create workflow and supports the all-workspaces session filter', () => {
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} />);
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+      wrapper: IntlTestWrapper,
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Add workspace' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Workspace editor');
@@ -121,7 +164,9 @@ describe('WorkspaceSidebarSection', () => {
 
   it('filters chats on row click and starts a workspace-preselected chat only from its add action', async () => {
     const user = userEvent.setup();
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} />);
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+      wrapper: IntlTestWrapper,
+    });
 
     await user.click(screen.getByRole('button', { name: 'Annual Meeting, chat filter active' }));
 
@@ -135,7 +180,9 @@ describe('WorkspaceSidebarSection', () => {
   it('exposes edit, duplicate, reveal, export, and delete actions', async () => {
     const user = userEvent.setup();
     duplicateWorkspace.mockResolvedValue(workspace);
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} />);
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+      wrapper: IntlTestWrapper,
+    });
 
     await user.click(screen.getByRole('button', { name: 'Actions for Annual Meeting' }));
     expect(
@@ -161,7 +208,9 @@ describe('WorkspaceSidebarSection', () => {
       showMessageBox: vi.fn().mockResolvedValue({ response: 1 }),
     });
     deleteWorkspace.mockResolvedValue(undefined);
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} />);
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+      wrapper: IntlTestWrapper,
+    });
 
     await user.click(screen.getByRole('button', { name: 'Actions for Annual Meeting' }));
     await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
@@ -178,7 +227,9 @@ describe('WorkspaceSidebarSection', () => {
     const user = userEvent.setup();
     vi.mocked(acpExportWorkspace).mockResolvedValue('{"schemaVersion":1}\n');
     saveArtifact.mockResolvedValue({ canceled: false });
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} />);
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+      wrapper: IntlTestWrapper,
+    });
 
     await user.click(screen.getByRole('button', { name: 'Actions for Annual Meeting' }));
     await user.click(screen.getByRole('menuitem', { name: 'Export metadata' }));
