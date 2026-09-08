@@ -75,3 +75,17 @@ read marker contents, scan directory listings, invoke Git, or grant file access.
 repository membership cannot be checked stay visible with an explanatory status. Ordinary
 data/document extensions outside repositories are retained unless their filename identifies
 a project file, such as `package.json` or `requirements.txt`.
+
+## Filesystem timestamps (2026-09-08)
+
+Outputs and Research Library share a file-row timestamp display. Electron returns filesystem
+birth time and modification time through a typed metadata-only IPC, capped at 200 paths per
+request and guarded by the existing per-window artifact authorization. Directories, missing
+files, and denied paths return unavailable metadata. A zero birth time is unavailable, never
+substituted with inode-change time or session discovery time.
+
+The renderer formats both timestamps in the user's locale/local timezone with seconds and a
+timezone tooltip. Metadata refreshes on list mount, inventory/file-version changes, and window
+focus, including a refresh after native artifact capabilities finish applying. Requests are batched;
+late responses from earlier list versions or refreshes are ignored.
+No timestamp is persisted into artifact provenance and no file-content read or new grant occurs.

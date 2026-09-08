@@ -4,6 +4,8 @@ import { toast } from 'react-toastify';
 import { defineMessages, useIntl } from '../../i18n';
 import { cn } from '../../utils';
 import { errorMessage } from '../../utils/conversionUtils';
+import { useArtifactFileTimestamps } from '../../hooks/useArtifactFileTimestamps';
+import type { ArtifactFileTimestamps } from '../../types/artifactFileTimestamps';
 import { ARTIFACT_TRASH_BATCH_LIMIT, type ArtifactTrashResult } from '../../types/artifactTrash';
 import { Button } from '../ui/button';
 import {
@@ -22,6 +24,17 @@ const i18n = defineMessages({
   selected: { id: 'artifactFiles.selected', defaultMessage: '{count} selected' },
   delete: { id: 'artifactFiles.delete', defaultMessage: 'Delete {name}' },
   deleteSelected: { id: 'artifactFiles.deleteSelected', defaultMessage: 'Delete selected' },
+  created: { id: 'artifactFiles.created', defaultMessage: 'Created: {timestamp}' },
+  modified: { id: 'artifactFiles.modified', defaultMessage: 'Modified: {timestamp}' },
+  unknownTime: { id: 'artifactFiles.unknownTime', defaultMessage: 'Unavailable' },
+  loadingTimes: {
+    id: 'artifactFiles.loadingTimes',
+    defaultMessage: 'Reading file timestamps…',
+  },
+  unavailableTimes: {
+    id: 'artifactFiles.unavailableTimes',
+    defaultMessage: 'File timestamps unavailable',
+  },
   title: {
     id: 'artifactFiles.title',
     defaultMessage: 'Move {count, plural, one {# file} other {# files}} to Trash?',
@@ -56,6 +69,7 @@ export interface ArtifactFileListItem {
   detail: string;
   active: boolean;
   status?: string;
+  timestampRevision?: string;
 }
 
 interface ArtifactFileListProps {
@@ -63,6 +77,50 @@ interface ArtifactFileListProps {
   label: string;
   onOpen: (path: string) => void;
   onDeleted: (paths: string[]) => void;
+}
+
+function FileTimestamps({ timestamps }: { timestamps: ArtifactFileTimestamps | null | undefined }) {
+  const intl = useIntl();
+  if (!timestamps) {
+    return (
+      <span className="mt-1 block text-[10px] text-text-secondary">
+        {intl.formatMessage(timestamps === null ? i18n.unavailableTimes : i18n.loadingTimes)}
+      </span>
+    );
+  }
+
+  return (
+    <span className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-text-secondary">
+      {(['createdAt', 'modifiedAt'] as const).map((field) => {
+        const value = timestamps[field];
+        const options: Intl.DateTimeFormatOptions = {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+          second: '2-digit',
+        };
+        const label = field === 'createdAt' ? i18n.created : i18n.modified;
+        const text = intl.formatMessage(label, {
+          timestamp: value ? intl.formatDate(value, options) : intl.formatMessage(i18n.unknownTime),
+        });
+        return value ? (
+          <time
+            key={field}
+            dateTime={value}
+            title={intl.formatMessage(label, {
+              timestamp: intl.formatDate(value, { ...options, timeZoneName: 'short' }),
+            })}
+          >
+            {text}
+          </time>
+        ) : (
+          <span key={field}>{text}</span>
+        );
+      })}
+    </span>
+  );
 }
 
 export async function trashArtifactFilesInBatches(
@@ -83,6 +141,7 @@ export async function trashArtifactFilesInBatches(
 
 export function ArtifactFileList({ items, label, onOpen, onDeleted }: ArtifactFileListProps) {
   const intl = useIntl();
+  const timestamps = useArtifactFileTimestamps(items);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<ArtifactFileListItem[]>([]);
   const [busy, setBusy] = useState(false);
@@ -215,6 +274,7 @@ export function ArtifactFileList({ items, label, onOpen, onDeleted }: ArtifactFi
                   <span className="block truncate text-[10px] text-text-secondary">
                     {item.detail}
                   </span>
+                  <FileTimestamps timestamps={timestamps[item.path]} />
                 </span>
                 {item.status && (
                   <span className="text-[10px] text-text-secondary">{item.status}</span>

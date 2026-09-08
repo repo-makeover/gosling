@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'react-toastify';
+import { IntlProvider } from 'react-intl';
 import { IntlTestWrapper } from '../../i18n/test-utils';
 import {
   ArtifactFileList,
@@ -46,12 +47,47 @@ function Harness({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(window.electron.getArtifactFileTimestamps).mockReset().mockResolvedValue({});
   trashArtifactFiles
     .mockReset()
     .mockImplementation(async (paths: string[]) =>
       paths.map((path) => ({ path, status: 'trashed' }))
     );
   Object.assign(window.electron, { trashArtifactFiles });
+});
+
+describe('ArtifactFileList timestamps', () => {
+  it('shows filesystem times with local formatting and exact machine-readable timestamps', async () => {
+    const createdAt = '2026-09-01T10:00:00.000Z';
+    const modifiedAt = '2026-09-08T12:34:56.000Z';
+    vi.mocked(window.electron.getArtifactFileTimestamps).mockResolvedValue({
+      [files[0].path]: { createdAt, modifiedAt },
+    });
+    render(
+      <IntlProvider locale="en-US" timeZone="America/Denver">
+        <ArtifactFileList items={[files[0]]} label="Outputs" onOpen={opened} onDeleted={deleted} />
+      </IntlProvider>
+    );
+    const modified = await screen.findByText(/^Modified:/);
+    expect(modified).toHaveAttribute('dateTime', modifiedAt);
+    expect(modified).toHaveTextContent('Sep 8, 2026');
+    expect(modified).toHaveTextContent('6:34:56 AM');
+    expect(modified).toHaveAttribute('title', expect.stringContaining('MDT'));
+    expect(screen.getByText(/^Created:/)).toHaveAttribute('dateTime', createdAt);
+    expect(opened).not.toHaveBeenCalled();
+  });
+
+  it('shows unavailable creation separately and keeps unreadable files visible', async () => {
+    vi.mocked(window.electron.getArtifactFileTimestamps).mockResolvedValue({
+      [files[0].path]: { createdAt: null, modifiedAt: '2026-09-08T12:00:00Z' },
+      [files[1].path]: null,
+    });
+    render(<Harness />);
+    expect(await screen.findByText('Created: Unavailable')).toBeInTheDocument();
+    expect(screen.getByText('File timestamps unavailable')).toBeInTheDocument();
+    expect(screen.getByTitle(files[1].path)).toBeInTheDocument();
+    expect(screen.getAllByText(/^Modified:/)).toHaveLength(1);
+  });
 });
 
 describe('ArtifactFileList deletion', () => {

@@ -143,6 +143,18 @@ checked, the pane shows a status and keeps those entries visible unless their fi
 identifies source/project content. Filtering preserves files, stored inventory, and open preview tabs.
 It changes presentation only; it does not change file access or the agent's working folders.
 
+### File timestamps
+
+Rows in both **Outputs** and **Library** show **Created** and **Modified** dates and times
+from the filesystem. They use your locale and local timezone, including seconds; hovering a
+timestamp also shows its timezone. These are the file's timestamps, not the time it was mentioned
+in a chat or added to the inventory. Copies in Outputs and Library can therefore have different times.
+
+Timestamps refresh when the list opens, its file versions change, or the app regains focus.
+If creation time is unavailable, **Created: Unavailable** is shown. Missing or inaccessible files
+remain listed with **File timestamps unavailable**. Reading timestamps does not open the file or
+grant additional access.
+
 ### Save, export, and download
 
 gosling's artifact router applies the same rule to every Desktop-owned save, export, and native

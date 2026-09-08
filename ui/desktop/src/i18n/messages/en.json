@@ -29,6 +29,9 @@
   "artifactFiles.confirm": {
     "defaultMessage": "Move to Trash"
   },
+  "artifactFiles.created": {
+    "defaultMessage": "Created: {timestamp}"
+  },
   "artifactFiles.delete": {
     "defaultMessage": "Delete {name}"
   },
@@ -44,8 +47,14 @@
   "artifactFiles.failed": {
     "defaultMessage": "{count,plural,one{Unable to delete # file. See the errors beside each item.} other{Unable to delete # files. See the errors beside each item.}}"
   },
+  "artifactFiles.loadingTimes": {
+    "defaultMessage": "Reading file timestamps…"
+  },
   "artifactFiles.missing": {
     "defaultMessage": "{count,plural,one{# file was already missing; removed from this list.} other{# files were already missing; removed from this list.}}"
+  },
+  "artifactFiles.modified": {
+    "defaultMessage": "Modified: {timestamp}"
   },
   "artifactFiles.select": {
     "defaultMessage": "Select {name}"
@@ -61,6 +70,12 @@
   },
   "artifactFiles.trashed": {
     "defaultMessage": "{count,plural,one{# file moved to Trash.} other{# files moved to Trash.}}"
+  },
+  "artifactFiles.unavailableTimes": {
+    "defaultMessage": "File timestamps unavailable"
+  },
+  "artifactFiles.unknownTime": {
+    "defaultMessage": "Unavailable"
   },
   "artifactMessageLinks.openDeliverable": {
     "defaultMessage": "Open {name} in Outputs"

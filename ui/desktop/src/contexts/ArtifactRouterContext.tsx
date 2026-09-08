@@ -13,6 +13,7 @@ import type {
   RoutedArtifactSaveResult,
 } from '../types/artifactRouter';
 import { resolveWorkspaceArtifact } from '../utils/artifactRouting';
+import { ARTIFACT_TIMESTAMPS_REFRESH_EVENT } from '../types/artifactFileTimestamps';
 import { useWorkspace } from './WorkspaceContext';
 
 const UNAVAILABLE_OUTPUT_CODES = new Set([
@@ -125,9 +126,19 @@ export function ArtifactRouterProvider({ children }: { children: React.ReactNode
   );
 
   useEffect(() => {
+    let cancelled = false;
     const config = nativeRoutingConfig(nativeWorkspace, artifactFiles);
-    void window.electron.setArtifactRoutingConfig(config).catch(() => {});
+    void window.electron
+      .setArtifactRoutingConfig(config)
+      .then((applied) => {
+        // File rows may mount before their exact-file capabilities reach Electron.
+        if (applied && !cancelled) {
+          window.dispatchEvent(new Event(ARTIFACT_TIMESTAMPS_REFRESH_EVENT));
+        }
+      })
+      .catch(() => {});
     return () => {
+      cancelled = true;
       void window.electron.setArtifactRoutingConfig(null).catch(() => {});
     };
   }, [artifactFiles, nativeWorkspace]);

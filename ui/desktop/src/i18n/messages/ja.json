@@ -3433,5 +3433,20 @@
   },
   "artifactPane.repositoryFilterEmpty": {
     "defaultMessage": "All matching outputs are hidden by this filter."
+  },
+  "artifactFiles.created": {
+    "defaultMessage": "Created: {timestamp}"
+  },
+  "artifactFiles.loadingTimes": {
+    "defaultMessage": "Reading file timestamps…"
+  },
+  "artifactFiles.modified": {
+    "defaultMessage": "Modified: {timestamp}"
+  },
+  "artifactFiles.unavailableTimes": {
+    "defaultMessage": "File timestamps unavailable"
+  },
+  "artifactFiles.unknownTime": {
+    "defaultMessage": "Unavailable"
   }
 }

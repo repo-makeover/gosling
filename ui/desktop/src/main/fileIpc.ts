@@ -18,6 +18,10 @@ import { readBoundedSessionImportFile } from '../utils/sessionImport';
 import { documentTitleFromContent, supportsDocumentTitle } from '../utils/documentTitle';
 import { ARTIFACT_TRASH_BATCH_LIMIT, type ArtifactTrashResult } from '../types/artifactTrash';
 import {
+  ARTIFACT_TIMESTAMPS_BATCH_LIMIT,
+  type ArtifactFileTimestampMap,
+} from '../types/artifactFileTimestamps';
+import {
   ARTIFACT_REPOSITORY_BATCH_LIMIT,
   type ArtifactRepositoryClassification,
 } from '../utils/artifactRepository';
@@ -57,6 +61,7 @@ export const FILE_IPC_CHANNELS = [
   'read-file',
   'read-artifact-file',
   'read-artifact-titles',
+  'get-artifact-file-timestamps',
   'classify-artifact-repositories',
   'open-artifact-file',
   'reveal-artifact-file',
@@ -352,6 +357,39 @@ export function registerFileIpcHandlers(
         }
       }
       return titles;
+    }
+  );
+
+  targetIpcMain.handle(
+    'get-artifact-file-timestamps',
+    async (event, filePaths: string[]): Promise<ArtifactFileTimestampMap> => {
+      if (
+        !Array.isArray(filePaths) ||
+        filePaths.length > ARTIFACT_TIMESTAMPS_BATCH_LIMIT ||
+        filePaths.some(
+          (filePath) => typeof filePath !== 'string' || !filePath || filePath.length > 4096
+        )
+      ) {
+        throw new Error('Invalid artifact timestamp batch');
+      }
+      const timestamps: ArtifactFileTimestampMap = {};
+      for (const filePath of new Set(filePaths)) {
+        timestamps[filePath] = null;
+        try {
+          const resolvedPath = await assertRendererArtifactFileAccess(event.sender.id, filePath);
+          const stats = await fs.stat(resolvedPath);
+          if (stats.isFile()) {
+            timestamps[filePath] = {
+              // Some filesystems report zero when birth time is unavailable; ctime is not creation.
+              createdAt: stats.birthtimeMs === 0 ? null : stats.birthtime.toISOString(),
+              modifiedAt: stats.mtime.toISOString(),
+            };
+          }
+        } catch {
+          // Missing and unauthorized files have no readable filesystem timestamps.
+        }
+      }
+      return timestamps;
     }
   );
 

@@ -88,6 +88,7 @@ Object.defineProperty(window, 'electron', {
     ),
     chooseResearchLibraryPath: vi.fn(() => Promise.resolve(null)),
     listResearchLibraryFiles: vi.fn(() => Promise.resolve({ files: [], truncated: false })),
+    getArtifactFileTimestamps: vi.fn(() => Promise.resolve({})),
     getSetting: vi.fn((key: string) => Promise.resolve(mockSettings[key])),
     getSettings: vi.fn((keys: string[]) =>
       Promise.resolve(Object.fromEntries(keys.map((key) => [key, mockSettings[key]])))

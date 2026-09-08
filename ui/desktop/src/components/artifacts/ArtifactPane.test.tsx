@@ -128,6 +128,7 @@ describe('ArtifactPane', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(window.electron.getArtifactFileTimestamps).mockReset().mockResolvedValue({});
     vi.mocked(acpChatSessionController.loadSession).mockReset().mockResolvedValue(true);
     clearSelectedSessionInputs('session-inputs', getSelectedSessionInputs('session-inputs'));
     localStorage.clear();
@@ -671,7 +672,12 @@ describe('ArtifactPane', () => {
     expect(getSelectedSessionInputs('session-pdf')).toEqual([]);
   });
 
-  it('browses durable research documents from the Library tab', async () => {
+  it('browses durable research documents with filesystem timestamps in the Library tab', async () => {
+    const libraryFile =
+      '/Users/tester/Documents/Gosling Research Library/bnn/bayesian-neural-networks.md';
+    vi.mocked(window.electron.getArtifactFileTimestamps).mockResolvedValue({
+      [libraryFile]: { createdAt: '2026-08-01T12:00:00Z', modifiedAt: '2026-09-08T12:34:56Z' },
+    });
     vi.mocked(window.electron.listResearchLibraryFiles).mockResolvedValue({
       files: [
         {
@@ -696,12 +702,39 @@ describe('ArtifactPane', () => {
     const libraryTab = await screen.findByRole('tab', { name: 'Library 1' });
     fireEvent.click(libraryTab);
 
+    expect(await screen.findByText(/^Modified:/)).toHaveAttribute(
+      'dateTime',
+      '2026-09-08T12:34:56Z'
+    );
+    expect(screen.getByText(/^Created:/)).toHaveAttribute('dateTime', '2026-08-01T12:00:00Z');
     expect(screen.getByTestId('library-count')).toHaveClass('rounded-md', 'border');
     expect(await screen.findByText('bayesian-neural-networks.md')).toBeInTheDocument();
     expect(screen.getByText(/bnn\/bayesian-neural-networks.md · 4 KB/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('bayesian-neural-networks.md'));
     expect(screen.getByRole('tab', { name: 'Outputs 0' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('uses filesystem timestamps instead of conversation discovery dates for Outputs', async () => {
+    vi.mocked(window.electron.getArtifactFileTimestamps).mockResolvedValue({
+      '/outputs/report.md': {
+        createdAt: '2026-08-01T12:00:00Z',
+        modifiedAt: '2026-09-08T12:34:56Z',
+      },
+    });
+    render(
+      <IntlTestWrapper>
+        <ArtifactWorkbenchProvider>
+          <Harness />
+        </ArtifactWorkbenchProvider>
+      </IntlTestWrapper>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Load mixed outputs' }));
+    expect(await screen.findByText(/^Modified:/)).toHaveAttribute(
+      'dateTime',
+      '2026-09-08T12:34:56Z'
+    );
+    expect(screen.getByText(/^Created:/)).toHaveAttribute('dateTime', '2026-08-01T12:00:00Z');
   });
 
   it('shows a document title above its file name in the Library list', async () => {

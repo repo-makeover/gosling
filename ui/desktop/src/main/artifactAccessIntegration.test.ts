@@ -117,6 +117,78 @@ async function createMainFileIpc() {
 }
 
 describe('live main artifact authorization', () => {
+  it('returns filesystem creation and modification times and observes later file changes', async () => {
+    const { invoke, publish, reportPath } = await createMainFileIpc();
+    await publish([reportPath]);
+    const modified = new Date('2025-06-01T09:10:11.000Z');
+    await fs.utimes(reportPath, modified, modified);
+    const stats = await fs.stat(reportPath);
+    expect(await invoke('get-artifact-file-timestamps', 7, [reportPath, reportPath])).toEqual({
+      [reportPath]: {
+        createdAt: stats.birthtimeMs === 0 ? null : stats.birthtime.toISOString(),
+        modifiedAt: modified.toISOString(),
+      },
+    });
+    const updated = new Date('2026-09-08T12:34:56.000Z');
+    await fs.utimes(reportPath, updated, updated);
+    expect(await invoke('get-artifact-file-timestamps', 7, [reportPath])).toMatchObject({
+      [reportPath]: { modifiedAt: updated.toISOString() },
+    });
+    expect(dialog.showOpenDialog).not.toHaveBeenCalled();
+    expect(shell.openPath).not.toHaveBeenCalled();
+  });
+
+  it('keeps missing, directory, neighboring, other-window and escaping-symlink timestamps unavailable', async () => {
+    const { invoke, publish, reportPath, outputRoot, launchRoot } = await createMainFileIpc();
+    const privatePath = path.join(outputRoot, 'private.md');
+    const missingPath = path.join(launchRoot, 'missing.md');
+    const escapedPath = path.join(launchRoot, 'escape.md');
+    await fs.writeFile(privatePath, 'private');
+    await fs.symlink(privatePath, escapedPath);
+    await publish([reportPath]);
+    expect(
+      await invoke('get-artifact-file-timestamps', 7, [
+        privatePath,
+        missingPath,
+        launchRoot,
+        escapedPath,
+      ])
+    ).toEqual({
+      [privatePath]: null,
+      [missingPath]: null,
+      [launchRoot]: null,
+      [escapedPath]: null,
+    });
+    expect(await invoke('get-artifact-file-timestamps', 8, [reportPath])).toEqual({
+      [reportPath]: null,
+    });
+  });
+
+  it('does not substitute ctime when filesystem creation time is unavailable', async () => {
+    const { invoke, publish, reportPath } = await createMainFileIpc();
+    await publish([reportPath]);
+    const stats = await fs.stat(reportPath);
+    stats.birthtimeMs = 0;
+    stats.birthtime = new Date(0);
+    const stat = vi.spyOn(fs, 'stat').mockResolvedValueOnce(stats);
+    try {
+      expect(await invoke('get-artifact-file-timestamps', 7, [reportPath])).toEqual({
+        [reportPath]: { createdAt: null, modifiedAt: stats.mtime.toISOString() },
+      });
+    } finally {
+      stat.mockRestore();
+    }
+  });
+
+  it('rejects malformed or oversized timestamp batches', async () => {
+    const { invoke, reportPath } = await createMainFileIpc();
+    for (const request of [null, [12], [''], ['x'.repeat(4097)], Array(201).fill(reportPath)]) {
+      await expect(invoke('get-artifact-file-timestamps', 7, request)).rejects.toThrow(
+        'Invalid artifact timestamp batch'
+      );
+    }
+  });
+
   it('classifies repository documents, worktrees and missing files without guessing from directory names', async () => {
     const { invoke, launchRoot } = await createMainFileIpc();
     const repo = path.join(launchRoot, 'project');

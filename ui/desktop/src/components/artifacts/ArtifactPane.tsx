@@ -926,6 +926,7 @@ export function ArtifactPane() {
                   path: file.path,
                   name: documentTitles[file.path] || file.name,
                   detail: `${file.relativePath} · ${formatInputSize(file.sizeBytes)}`,
+                  timestampRevision: file.modifiedAt,
                   active: false,
                 }))}
                 onOpen={(path) => {
@@ -989,6 +990,7 @@ export function ArtifactPane() {
                 label={intl.formatMessage(i18n.outputs)}
                 items={displayedArtifacts.map((artifact) => ({
                   path: artifact.resolvedPath,
+                  timestampRevision: artifact.lastSeenAt,
                   name: documentTitles[artifact.displayPath] || artifact.displayPath,
                   detail: documentTitles[artifact.displayPath]
                     ? `${artifact.displayPath} · ${artifact.relation}`

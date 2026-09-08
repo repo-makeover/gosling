@@ -6,6 +6,7 @@ import { acpCreateWorkspaceOutput } from '../acp/workspaces';
 import { ArtifactRouterProvider, useArtifactRouter } from './ArtifactRouterContext';
 import { useWorkspace } from './WorkspaceContext';
 import { IntlTestWrapper } from '../i18n/test-utils';
+import { useArtifactFileTimestamps } from '../hooks/useArtifactFileTimestamps';
 
 vi.mock('./WorkspaceContext', () => ({ useWorkspace: vi.fn() }));
 vi.mock('../acp/workspaces', () => ({ acpCreateWorkspaceOutput: vi.fn() }));
@@ -128,6 +129,41 @@ describe('ArtifactRouterProvider', () => {
     expect(setArtifactRoutingConfig).toHaveBeenCalledWith(
       expect.objectContaining({ workspaceId: 'active' })
     );
+  });
+
+  it('refreshes row timestamps after native file capabilities finish applying', async () => {
+    let finish!: (applied: boolean) => void;
+    let applied = false;
+    setArtifactRoutingConfig.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    const filePath = '/active/Documents/report.md';
+    const modifiedAt = '2026-09-08T12:34:56Z';
+    const getTimes = vi.mocked(window.electron.getArtifactFileTimestamps);
+    getTimes.mockImplementation(async () => ({
+      [filePath]: applied ? { createdAt: null, modifiedAt } : null,
+    }));
+    function FileRow() {
+      const timestamps = useArtifactFileTimestamps([{ path: filePath }]);
+      return <span>{timestamps[filePath]?.modifiedAt ?? 'unavailable'}</span>;
+    }
+    const view = render(
+      <IntlTestWrapper>
+        <ArtifactRouterProvider>
+          <FileRow />
+        </ArtifactRouterProvider>
+      </IntlTestWrapper>
+    );
+    await waitFor(() => expect(getTimes).toHaveBeenCalledTimes(1));
+    expect(view.getByText('unavailable')).toBeInTheDocument();
+    await act(async () => {
+      applied = true;
+      finish(true);
+    });
+    expect(await view.findByText(modifiedAt)).toBeInTheDocument();
+    expect(getTimes).toHaveBeenCalledTimes(2);
   });
 
   it('routes an existing session artifact through its pinned workspace', async () => {
