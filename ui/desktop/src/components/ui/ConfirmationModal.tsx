@@ -53,14 +53,14 @@ export function ConfirmationModal({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onCancel()}>
       <DialogContent className="sm:max-w-[425px] max-h-[85vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{message}</DialogDescription>
-        </DialogHeader>
+        <div className="min-h-0 overflow-y-auto space-y-4 break-words">
+          <DialogHeader className="pr-6">
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{message}</DialogDescription>
+          </DialogHeader>
 
-        {detail && (
-          <div className="overflow-y-auto min-h-0 text-sm text-text-muted break-all">{detail}</div>
-        )}
+          {detail && <div className="text-sm text-text-muted break-all">{detail}</div>}
+        </div>
 
         <DialogFooter className="pt-2 shrink-0">
           <Button
@@ -77,7 +77,9 @@ export function ConfirmationModal({
             disabled={isSubmitting}
             className="focus-visible:ring-2 focus-visible:ring-background-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background-default"
           >
-            {isSubmitting ? intl.formatMessage(i18n.processing) : (confirmLabel || intl.formatMessage(i18n.defaultConfirm))}
+            {isSubmitting
+              ? intl.formatMessage(i18n.processing)
+              : confirmLabel || intl.formatMessage(i18n.defaultConfirm)}
           </Button>
         </DialogFooter>
       </DialogContent>
