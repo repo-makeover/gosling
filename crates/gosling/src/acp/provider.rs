@@ -225,6 +225,9 @@ struct HandoffContextClaim {
 }
 
 fn reusable_permission_tool_name(request: &RequestPermissionRequest) -> Option<String> {
+    if is_security_permission_request(request) {
+        return None;
+    }
     let offers_tool_wide_grant = request.options.iter().any(|option| {
         option.kind == PermissionOptionKind::AllowAlways
             && option.option_id.0.as_ref() != "allow_always_domain"
@@ -233,6 +236,10 @@ fn reusable_permission_tool_name(request: &RequestPermissionRequest) -> Option<S
         return None;
     }
 
+    permission_tool_name(request)
+}
+
+fn permission_tool_name(request: &RequestPermissionRequest) -> Option<String> {
     request
         .tool_call
         .fields
@@ -722,6 +729,16 @@ impl Provider for AcpProvider {
                     AcpUpdate::PermissionRequest { request, response_tx } => {
                         text_run = None;
                         thought_run = None;
+                        if let Some(decision) = saved_permission_decision(
+                            &permission_manager, &provider_name, gosling_mode, &request,
+                        ) {
+                            if decision.should_record_rejection() {
+                                rejected_tool_calls.insert(request.tool_call.tool_call_id.0.to_string());
+                            }
+                            let _ = response_tx.send(map_permission_response(&request, decision));
+                            continue;
+                        }
+
                         if let Some(decision) = permission_decision_from_mode(gosling_mode, &request) {
                             if decision.should_record_rejection() {
                                 rejected_tool_calls.insert(request.tool_call.tool_call_id.0.to_string());
@@ -730,30 +747,6 @@ impl Provider for AcpProvider {
                             continue;
                         }
 
-                        if let Some(tool_name) = reusable_permission_tool_name(&request) {
-                            match permission_manager
-                                .get_acp_provider_permission(&provider_name, &tool_name)
-                            {
-                                Some(PermissionLevel::AlwaysAllow) => {
-                                    let _ = response_tx.send(map_permission_response(
-                                        &request,
-                                        PermissionDecision::AllowAlways,
-                                    ));
-                                    continue;
-                                }
-                                Some(PermissionLevel::NeverAllow) => {
-                                    rejected_tool_calls.insert(
-                                        request.tool_call.tool_call_id.0.to_string(),
-                                    );
-                                    let _ = response_tx.send(map_permission_response(
-                                        &request,
-                                        PermissionDecision::RejectAlways,
-                                    ));
-                                    continue;
-                                }
-                                Some(PermissionLevel::AskBefore) | None => {}
-                            }
-                        }
 
                         let request_id = request.tool_call.tool_call_id.0.to_string();
                         let (tx, rx) = oneshot::channel();
@@ -1737,6 +1730,11 @@ fn build_action_required_message(request: &RequestPermissionRequest) -> Option<M
                 },
                 _ => None,
             })
+        })
+        .or_else(|| {
+            reusable_permission_tool_name(request).is_none().then(|| {
+                "Only one-time approval is available for this provider request.".to_string()
+            })
         });
 
     Some(
@@ -1824,6 +1822,24 @@ fn resolve_mode(
         Some(*current)
     } else {
         Some(candidates[0])
+    }
+}
+
+fn saved_permission_decision(
+    manager: &PermissionManager,
+    provider_name: &str,
+    mode: GoslingMode,
+    request: &RequestPermissionRequest,
+) -> Option<PermissionDecision> {
+    let tool_name = permission_tool_name(request)?;
+    match manager.get_acp_provider_permission(provider_name, &tool_name) {
+        Some(PermissionLevel::NeverAllow) => Some(PermissionDecision::RejectAlways),
+        Some(PermissionLevel::AlwaysAllow)
+            if mode != GoslingMode::Chat && reusable_permission_tool_name(request).is_some() =>
+        {
+            Some(PermissionDecision::AllowAlways)
+        }
+        _ => None,
     }
 }
 
@@ -1921,6 +1937,66 @@ mod tests {
             reloaded.get_acp_provider_permission("other-provider", "Bash"),
             None
         );
+    }
+
+    #[test]
+    fn saved_provider_permissions_respect_security_scope_chat_and_revocation() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = PermissionManager::new(temp.path().into());
+        let ordinary = permission_request(
+            "Bash",
+            vec![permission_option(
+                "allow_always",
+                PermissionOptionKind::AllowAlways,
+            )],
+        );
+        let mut security = ordinary.clone();
+        security.tool_call.fields.content = Some(Vec::new());
+        manager
+            .update_acp_provider_permission("provider", "Bash", PermissionLevel::AlwaysAllow)
+            .unwrap();
+        assert_eq!(
+            saved_permission_decision(&manager, "provider", GoslingMode::Approve, &ordinary),
+            Some(PermissionDecision::AllowAlways)
+        );
+        assert_eq!(
+            saved_permission_decision(&manager, "provider", GoslingMode::Chat, &ordinary),
+            None
+        );
+        assert_eq!(
+            saved_permission_decision(&manager, "provider", GoslingMode::Auto, &security),
+            None
+        );
+        assert_eq!(
+            saved_permission_decision(&manager, "other-provider", GoslingMode::Approve, &ordinary),
+            None
+        );
+        PermissionManager::new(temp.path().into())
+            .update_acp_provider_permission("provider", "Bash", PermissionLevel::NeverAllow)
+            .unwrap();
+        for request in [&ordinary, &security] {
+            assert_eq!(
+                saved_permission_decision(&manager, "provider", GoslingMode::Auto, request),
+                Some(PermissionDecision::RejectAlways)
+            );
+        }
+    }
+
+    #[test]
+    fn one_time_provider_requests_do_not_offer_an_unsavable_persistent_approval() {
+        let request = permission_request(
+            "Bash",
+            vec![permission_option(
+                "allow_once",
+                PermissionOptionKind::AllowOnce,
+            )],
+        );
+        let message = build_action_required_message(&request).unwrap();
+        let action = message.content[0].as_action_required().unwrap();
+        assert!(matches!(&action.data,
+            crate::conversation::message::ActionRequiredData::ToolConfirmation { prompt: Some(prompt), .. }
+            if prompt.contains("Only one-time approval")
+        ));
     }
 
     #[test]

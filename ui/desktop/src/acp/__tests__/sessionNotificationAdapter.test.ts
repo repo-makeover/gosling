@@ -683,6 +683,52 @@ describe('createAcpSessionNotificationAdapter', () => {
   });
 
   describe('applyPermissionRequest', () => {
+    it('refreshes replacement prompts and preserves the offered domain scope', () => {
+      const adapter = createAcpSessionNotificationAdapter();
+      const request: RequestPermissionRequest = {
+        sessionId: SESSION_ID,
+        options: [
+          {
+            optionId: 'allow_always_domain',
+            name: 'Always allow audit.invalid',
+            kind: 'allow_always',
+          },
+        ],
+        toolCall: {
+          toolCallId: 'retry',
+          title: 'Shell',
+          content: [{ type: 'content', content: { type: 'text', text: 'First prompt' } }],
+          _meta: {
+            gosling: {
+              toolCall: { toolName: 'developer__shell' },
+              permission: { domain: 'audit.invalid' },
+            },
+          },
+        },
+      };
+      adapter.applyPermissionRequest(request);
+      const changes = adapter.applyPermissionRequest({
+        ...request,
+        toolCall: {
+          ...request.toolCall,
+          content: [
+            { type: 'content', content: { type: 'text', text: 'Retry after save failure' } },
+          ],
+        },
+      });
+      const messages = expectOnlyMessagesChange(adapter, changes);
+      expect(messages).toHaveLength(1);
+      expect(firstContent(messages[0])).toMatchObject({
+        type: 'actionRequired',
+        data: {
+          id: 'retry',
+          toolName: 'developer__shell',
+          domain: 'audit.invalid',
+          prompt: 'Retry after save failure',
+        },
+      });
+    });
+
     it('maps permission requests to action-required tool confirmations', () => {
       const adapter = createAcpSessionNotificationAdapter();
 

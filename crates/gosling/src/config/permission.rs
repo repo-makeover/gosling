@@ -1,12 +1,11 @@
 use crate::config::paths::Paths;
+use fs2::FileExt;
 use rmcp::model::Tool;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{
-    Arc, LazyLock, Mutex, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard, Weak,
-};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError, Weak};
 use tracing;
 use utoipa::ToSchema;
 
@@ -36,8 +35,6 @@ pub struct PermissionConfig {
 #[derive(Debug)]
 pub struct PermissionManager {
     config_path: PathBuf,
-    permission_map: RwLock<HashMap<String, PermissionConfig>>,
-    persist_lock: Mutex<()>,
 }
 
 // Constants representing specific permission categories
@@ -49,7 +46,7 @@ const ACP_PROVIDER_PERMISSION: &str = "acp_provider";
 impl PermissionManager {
     pub fn new(config_dir: PathBuf) -> Self {
         let permission_path = config_dir.join(PERMISSION_FILE);
-        let permission_map = if permission_path.exists() {
+        let _: HashMap<String, PermissionConfig> = if permission_path.exists() {
             let file_contents =
                 fs::read_to_string(&permission_path).expect("Failed to read permission.yaml");
             serde_yaml::from_str(&file_contents).unwrap_or_else(|e| {
@@ -74,8 +71,6 @@ impl PermissionManager {
         };
         PermissionManager {
             config_path: permission_path,
-            permission_map: RwLock::new(permission_map),
-            persist_lock: Mutex::new(()),
         }
     }
 
@@ -96,19 +91,47 @@ impl PermissionManager {
         manager
     }
 
-    /// The permission map stays structurally valid even if a thread panicked
-    /// while holding the lock, so recover from poison instead of turning one
-    /// panic into a panic on every subsequent permission check.
-    fn read_map(&self) -> RwLockReadGuard<'_, HashMap<String, PermissionConfig>> {
-        self.permission_map
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
+    fn acquire_lock(&self, exclusive: bool) -> anyhow::Result<fs::File> {
+        // Lock a stable sidecar: atomic replacement changes the YAML file's inode.
+        let mut options = fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(self.config_path.with_extension("yaml.lock"))?;
+        if exclusive {
+            FileExt::lock_exclusive(&file)?;
+        } else {
+            FileExt::lock_shared(&file)?;
+        }
+        Ok(file)
     }
 
-    fn write_map(&self) -> RwLockWriteGuard<'_, HashMap<String, PermissionConfig>> {
-        self.permission_map
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
+    fn read_file(&self) -> anyhow::Result<HashMap<String, PermissionConfig>> {
+        match fs::read_to_string(&self.config_path) {
+            Ok(contents) => Ok(serde_yaml::from_str(&contents)?),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(HashMap::new()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn read_map(&self) -> anyhow::Result<HashMap<String, PermissionConfig>> {
+        let _lock = self.acquire_lock(false)?;
+        self.read_file()
+    }
+
+    fn mutate_permissions(
+        &self,
+        mutate: impl FnOnce(&mut HashMap<String, PermissionConfig>),
+    ) -> anyhow::Result<()> {
+        let _lock = self.acquire_lock(true)?;
+        let mut map = self.read_file()?;
+        mutate(&mut map);
+        let yaml = serde_yaml::to_string(&map)?;
+        crate::config::base::write_file_atomic(&self.config_path, &yaml)?;
+        Ok(())
     }
 
     fn apply_permission_updates(
@@ -116,54 +139,45 @@ impl PermissionManager {
         category: &str,
         updates: &[(String, PermissionLevel)],
     ) -> Result<(), String> {
-        let _persist_guard = self
-            .persist_lock
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let mut map = self.write_map();
-        let previous = map.clone();
-        let permission_config = map.entry(category.to_string()).or_default();
+        self.mutate_permissions(|map| {
+            let permission_config = map.entry(category.to_string()).or_default();
 
-        for (principal_name, level) in updates {
-            permission_config
-                .always_allow
-                .retain(|principal| principal != principal_name);
-            permission_config
-                .ask_before
-                .retain(|principal| principal != principal_name);
-            permission_config
-                .never_allow
-                .retain(|principal| principal != principal_name);
+            for (principal_name, level) in updates {
+                permission_config
+                    .always_allow
+                    .retain(|principal| principal != principal_name);
+                permission_config
+                    .ask_before
+                    .retain(|principal| principal != principal_name);
+                permission_config
+                    .never_allow
+                    .retain(|principal| principal != principal_name);
 
-            match level {
-                PermissionLevel::AlwaysAllow => {
-                    permission_config.always_allow.push(principal_name.clone())
-                }
-                PermissionLevel::AskBefore => {
-                    permission_config.ask_before.push(principal_name.clone())
-                }
-                PermissionLevel::NeverAllow => {
-                    permission_config.never_allow.push(principal_name.clone())
+                match level {
+                    PermissionLevel::AlwaysAllow => {
+                        permission_config.always_allow.push(principal_name.clone())
+                    }
+                    PermissionLevel::AskBefore => {
+                        permission_config.ask_before.push(principal_name.clone())
+                    }
+                    PermissionLevel::NeverAllow => {
+                        permission_config.never_allow.push(principal_name.clone())
+                    }
                 }
             }
-        }
-
-        let result = serde_yaml::to_string(&*map)
-            .map_err(|e| e.to_string())
-            .and_then(|yaml| {
-                crate::config::base::write_file_atomic(&self.config_path, &yaml)
-                    .map_err(|e| e.to_string())
-            });
-        if let Err(error) = result {
-            *map = previous;
-            return Err(error);
-        }
-        Ok(())
+        })
+        .map_err(|error| error.to_string())
     }
 
     /// Returns a list of all the names (keys) in the permission map.
     pub fn get_permission_names(&self) -> Vec<String> {
-        self.read_map().keys().cloned().collect()
+        match self.read_map() {
+            Ok(map) => map.keys().cloned().collect(),
+            Err(error) => {
+                tracing::error!(%error, path = ?self.config_path, "Could not read permission names");
+                Vec::new()
+            }
+        }
     }
 
     /// Retrieves the user permission level for a specific tool.
@@ -229,14 +243,25 @@ impl PermissionManager {
                 security.event_type = "permission_persist_failed",
                 error = %e,
                 path = ?self.config_path,
-                "tool annotations could not be saved; the in-memory update was rolled back"
+                "tool annotations could not be saved"
             );
         }
     }
 
     /// Helper function to retrieve the permission level for a specific permission category and tool.
     fn get_permission(&self, name: &str, principal_name: &str) -> Option<PermissionLevel> {
-        let map = self.read_map();
+        let map = match self.read_map() {
+            Ok(map) => map,
+            Err(error) => {
+                tracing::error!(
+                    security.event_type = "permission_read_failed",
+                    %error,
+                    path = ?self.config_path,
+                    "Permission state is unavailable; refusing to reuse authority"
+                );
+                return Some(PermissionLevel::NeverAllow);
+            }
+        };
         // Check if the permission category exists in the map
         if let Some(permission_config) = map.get(name) {
             // A denial outranks the other levels: a principal listed in never_allow stays denied
@@ -320,39 +345,23 @@ impl PermissionManager {
 
     /// Removes all permission entries in an extension's tool namespace.
     pub fn remove_extension(&self, extension_name: &str) -> anyhow::Result<()> {
-        let _persist_guard = self
-            .persist_lock
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let mut map = self.write_map();
-        let previous = map.clone();
-        let prefix = format!("{extension_name}__");
-        let belongs_to_extension = |principal: &String| {
-            extension_name.is_empty() || principal.starts_with(prefix.as_str())
-        };
-        for permission_config in map.values_mut() {
-            permission_config
-                .always_allow
-                .retain(|principal| !belongs_to_extension(principal));
-            permission_config
-                .ask_before
-                .retain(|principal| !belongs_to_extension(principal));
-            permission_config
-                .never_allow
-                .retain(|principal| !belongs_to_extension(principal));
-        }
-
-        let result = serde_yaml::to_string(&*map)
-            .map_err(anyhow::Error::from)
-            .and_then(|yaml| {
-                crate::config::base::write_file_atomic(&self.config_path, &yaml)
-                    .map_err(anyhow::Error::from)
-            });
-        if let Err(error) = result {
-            *map = previous;
-            return Err(error);
-        }
-        Ok(())
+        self.mutate_permissions(|map| {
+            let prefix = format!("{extension_name}__");
+            let belongs_to_extension = |principal: &String| {
+                extension_name.is_empty() || principal.starts_with(prefix.as_str())
+            };
+            for permission_config in map.values_mut() {
+                permission_config
+                    .always_allow
+                    .retain(|principal| !belongs_to_extension(principal));
+                permission_config
+                    .ask_before
+                    .retain(|principal| !belongs_to_extension(principal));
+                permission_config
+                    .never_allow
+                    .retain(|principal| !belongs_to_extension(principal));
+            }
+        })
     }
 }
 
@@ -547,7 +556,7 @@ mod tests {
         );
 
         // Ensure it's removed from other levels
-        let map = manager.permission_map.read().unwrap();
+        let map = manager.read_map().unwrap();
         let config = map.get(USER_PERMISSION).unwrap();
         assert!(!config.always_allow.contains(&"tool7".to_string()));
         assert!(!config.ask_before.contains(&"tool7".to_string()));
@@ -573,7 +582,7 @@ mod tests {
         // Remove entries starting with "prefix"
         manager.remove_extension("prefix").unwrap();
 
-        let map = manager.permission_map.read().unwrap();
+        let map = manager.read_map().unwrap();
         let config = map.get(USER_PERMISSION).unwrap();
 
         // Verify entries with "prefix" are removed
@@ -590,7 +599,7 @@ mod tests {
     }
 
     #[test]
-    fn test_remove_extension_rolls_back_when_persistence_fails() {
+    fn test_remove_extension_fails_closed_when_storage_is_unreadable() {
         let (manager, _temp_dir) = create_test_permission_manager();
         manager
             .update_user_permission("prefix__tool1", PermissionLevel::AlwaysAllow)
@@ -601,7 +610,7 @@ mod tests {
         assert!(manager.remove_extension("prefix").is_err());
         assert_eq!(
             manager.get_user_permission("prefix__tool1"),
-            Some(PermissionLevel::AlwaysAllow)
+            Some(PermissionLevel::NeverAllow)
         );
     }
 

@@ -40,7 +40,9 @@ Closed on 2026-08-26 with focused regression and compile evidence recorded in
 - [x] **CAS-GSL-001** — Imported `imported_untrusted` history must be labeled or
       stripped at the model boundary, not only UI/artifacts.
 - [x] **CON-GSL-002** — `permission.yaml` needs the same cross-process flock as
-      `config.yaml`.
+      `config.yaml`. Permission-file locking and fresh reads were repaired and
+      tested on 2026-09-07 as **CON-GSL-901**; see the
+      [permission repair report](cloud/2026-09-07-permissions-repair.md).
 - [x] **WFG-GSL-005** — Chat mode should omit tools from the provider payload;
       skips must not render as tool success.
 - [x] **NEG-GSL-006** — Unix session-dir `0o700` failure should abort pool init.
@@ -51,8 +53,12 @@ CAS-GSL-001, WFG-GSL-005, NEG-GSL-006, CMP-GSL-001, and CMP-GSL-003 were
 closed on 2026-08-27 with focused regression, compile, Clippy, formatting, and
 source/documentation consistency evidence in the second batch of
 [`docs/logs/session/2026-08-27-medium-defect-campaign.md`](logs/session/2026-08-27-medium-defect-campaign.md).
-CON-GSL-002 was already closed in `37804170e`; this pass only reconciled the
-stale duplicate checkbox with the existing closed record below.
+Correction on 2026-09-07 (**CMP-GSL-901**): the earlier reconciliation incorrectly
+attributed permission-file locking to `37804170e`. That commit closed the
+`config.yaml` read-modify-write issue recorded below; it did not change
+`permission.yaml`. The permission-file issue is now separately repaired, with
+independent-process writer and existing-reader revocation regressions recorded
+in the [permission repair report](cloud/2026-09-07-permissions-repair.md).
 
 ### Third criticality batch
 
@@ -334,7 +340,7 @@ rediscovered from scratch.
 - [x] **Upstream port** (`60e72c61a`) — `form-action 'none'` added to both
       MCP-app CSP builders, from goose `34adc70f1` (PR #10985). Neither gosling
       variant had it while both emit `allow-forms` on the guest sandbox.
-- [x] **CON-GSL-002** (`37804170e`) — the four config read-modify-write paths
+- [x] **CON-GSL-002** (`37804170e`) — the four `config.yaml` read-modify-write paths
       hold the `.save.lock` flock across read, mutate, and write, not just the
       write. The new test fails deterministically without the lock, and the fix
       also removed a self-deadlock where `load_write_config` persisted

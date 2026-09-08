@@ -2,6 +2,7 @@ import type { RequestPermissionRequest, RequestPermissionResponse } from '@agent
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   cancelAcpPermissionRequestsForSession,
+  acpPermissionRequestIdentity,
   isAcpPermissionRequestPending,
   requestAcpPermission,
   resolveAcpPermissionRequest,
@@ -56,6 +57,20 @@ async function expectStillPending(promise: Promise<RequestPermissionResponse>): 
 }
 
 describe('ACP permission requests', () => {
+  it('does not confuse identities containing the old separator', async () => {
+    const first = requestAcpPermission(permissionRequest('session-1', 'part\u0000tool'));
+    const second = requestAcpPermission(permissionRequest('session-1\u0000part', 'tool'));
+    expect(resolveAcpPermissionRequest('session-1', 'part\u0000tool', 'allow_once')).toBe(true);
+    await expect(first).resolves.toEqual({
+      outcome: { outcome: 'selected', optionId: 'allow-once' },
+    });
+    await expectStillPending(second);
+    expect(resolveAcpPermissionRequest('session-1\u0000part', 'tool', 'deny_once')).toBe(true);
+    await expect(second).resolves.toEqual({
+      outcome: { outcome: 'selected', optionId: 'reject-once' },
+    });
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     for (const sessionId of TEST_SESSION_IDS) {
@@ -179,14 +194,29 @@ describe('ACP permission requests', () => {
     });
   });
 
-  it('cancels when no always_allow_domain option is offered', async () => {
+  it('keeps the request pending when an unavailable option is selected', async () => {
     const response = requestAcpPermission(permissionRequest('session-1', 'tool-1'));
 
-    expect(resolveAcpPermissionRequest('session-1', 'tool-1', 'always_allow_domain')).toBe(true);
-    await expect(response).resolves.toEqual({
-      outcome: {
-        outcome: 'cancelled',
-      },
+    expect(resolveAcpPermissionRequest('session-1', 'tool-1', 'always_allow_domain')).toBe(false);
+    await expectStillPending(response);
+  });
+  it('rejects a response from a replaced request with the same session and id', async () => {
+    const first = requestAcpPermission(permissionRequest('session-1', 'tool-1'));
+    const identity = acpPermissionRequestIdentity('session-1', 'tool-1');
+    const replacement = requestAcpPermission(permissionRequest('session-1', 'tool-1'));
+    expect(resolveAcpPermissionRequest('session-1', 'tool-1', 'allow_once', identity)).toBe(false);
+    await expect(first).resolves.toEqual({ outcome: { outcome: 'cancelled' } });
+    await expectStillPending(replacement);
+    expect(
+      resolveAcpPermissionRequest(
+        'session-1',
+        'tool-1',
+        'deny_once',
+        acpPermissionRequestIdentity('session-1', 'tool-1')
+      )
+    ).toBe(true);
+    await expect(replacement).resolves.toEqual({
+      outcome: { outcome: 'selected', optionId: 'reject-once' },
     });
   });
 });

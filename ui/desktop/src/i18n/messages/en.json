@@ -3122,14 +3122,14 @@
   "toolApprovalButtons.alwaysAllowDomain": {
     "defaultMessage": "Always allow {domain}"
   },
+  "toolApprovalButtons.alwaysAllowDomainRequested": {
+    "defaultMessage": "Always allow {domain} requested"
+  },
   "toolApprovalButtons.alwaysAllowExtension": {
     "defaultMessage": "Always Allow all {extensionName} tools"
   },
-  "toolApprovalButtons.alwaysAllowed": {
-    "defaultMessage": "Always allowed"
-  },
-  "toolApprovalButtons.alwaysAllowedDomain": {
-    "defaultMessage": "Always allowed ({domain})"
+  "toolApprovalButtons.alwaysAllowRequested": {
+    "defaultMessage": "Always Allow requested"
   },
   "toolApprovalButtons.alwaysAllowedExtension": {
     "defaultMessage": "Always allowed ({extensionName} tools)"

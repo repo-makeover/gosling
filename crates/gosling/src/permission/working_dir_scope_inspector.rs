@@ -41,9 +41,7 @@ impl ToolInspector for WorkingDirScopeInspector {
         _messages: &[Message],
         _gosling_mode: GoslingMode,
     ) -> Result<Vec<InspectionResult>> {
-        let Ok(session) = self.session_manager.get_session(session_id, false).await else {
-            return Ok(Vec::new());
-        };
+        let session = self.session_manager.get_session(session_id, false).await?;
         if !session.restrict_tools_to_working_dirs && session.workspace_context.is_none() {
             return Ok(Vec::new());
         }
@@ -95,6 +93,26 @@ impl ToolInspector for WorkingDirScopeInspector {
                         continue;
                     }
                 }
+            }
+            if is_shell_tool(tool_call)
+                && tool_call
+                    .arguments
+                    .as_ref()
+                    .and_then(|args| args.get("command"))
+                    .and_then(|value| value.as_str())
+                    .is_some_and(|command| !analyze_shell(command).complete)
+            {
+                let reason = "Shell syntax could not be fully inspected against this session's folders. Split the command into simpler calls or approve this call once.".to_string();
+                results.push(InspectionResult {
+                    tool_request_id: request.id.clone(),
+                    action: InspectionAction::RequireApproval(Some(reason.clone())),
+                    reason,
+                    confidence: 1.0,
+                    inspector_name: self.name().to_string(),
+                    finding_id: Some("SEC-GSL-901".to_string()),
+                    metadata: None,
+                });
+                continue;
             }
             let candidate_paths = if session.restrict_tools_to_working_dirs {
                 referenced_paths(tool_call, &session.working_dir)
@@ -400,100 +418,242 @@ fn collect_referenced_paths(
     }
 }
 
-/// Splits a command at unquoted `;`, newline, `|`, `||`, and `&&` so each
-/// simple command is judged on its own. Word splitting alone leaves a
-/// separator glued to its neighbour (`head file;`), which merges every
-/// command into one segment and turns `file;` into a path.
-fn split_shell_command(command: &str) -> Vec<String> {
-    let mut segments = Vec::new();
-    let mut current = String::new();
-    let mut chars = command.chars().peekable();
-    let mut quote: Option<char> = None;
-    let mut word_start = true;
-    while let Some(character) = chars.next() {
-        match quote {
-            Some('\'') => {
-                current.push(character);
-                if character == '\'' {
-                    quote = None;
-                }
-            }
-            Some(_) => {
-                current.push(character);
-                if character == '\\' {
-                    if let Some(escaped) = chars.next() {
-                        current.push(escaped);
-                    }
-                } else if character == '"' {
-                    quote = None;
-                }
-            }
-            None => match character {
-                '\'' | '"' => {
-                    quote = Some(character);
-                    word_start = false;
-                    current.push(character);
-                }
-                '\\' => {
-                    current.push(character);
-                    if let Some(escaped) = chars.next() {
-                        current.push(escaped);
-                        if escaped != '\n' {
-                            word_start = false;
+struct ShellSegment {
+    words: Vec<String>,
+    read_only: bool,
+}
+
+struct ShellAnalysis {
+    segments: Vec<ShellSegment>,
+    complete: bool,
+}
+
+fn analyze_shell(command: &str) -> ShellAnalysis {
+    analyze_shell_at_depth(command, 0)
+}
+
+fn analyze_shell_at_depth(command: &str, depth: usize) -> ShellAnalysis {
+    let mut analysis = ShellAnalysis {
+        segments: Vec::new(),
+        complete: false,
+    };
+    if depth >= 16 {
+        return analysis;
+    }
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_bash::LANGUAGE.into())
+        .expect("Bash grammar must match the parser");
+    let Some(tree) = parser.parse(command, None) else {
+        return analysis;
+    };
+    let spliced = splice_shell_continuations(command, tree.root_node());
+    let command = spliced.as_deref().unwrap_or(command);
+    let tree = if spliced.is_some() {
+        let Some(tree) = parser.parse(command, None) else {
+            return analysis;
+        };
+        tree
+    } else {
+        tree
+    };
+    analysis.complete = !tree.root_node().has_error();
+    let mut pending = vec![tree.root_node()];
+    while let Some(node) = pending.pop() {
+        match node.kind() {
+            "command" => {
+                let words = parsed_command_words(node, command);
+                let command_words = command_words(&words);
+                if let Some(executable) = command_words.first() {
+                    let executable = Path::new(executable)
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default();
+                    if matches!(executable, "sh" | "bash" | "zsh" | "dash" | "ksh") {
+                        if let Some(index) = command_words
+                            .iter()
+                            .position(|word| word.starts_with('-') && word.contains('c'))
+                        {
+                            if let Some(script) = command_words.get(index + 1) {
+                                let nested = analyze_shell_at_depth(script, depth + 1);
+                                analysis.complete &= nested.complete;
+                                analysis.segments.extend(nested.segments);
+                            } else {
+                                analysis.complete = false;
+                            }
                         }
                     }
-                }
-                '#' if word_start => {
-                    // Quotes in comments must not absorb subsequent commands.
-                    for character in chars.by_ref() {
-                        if character == '\n' {
-                            segments.push(std::mem::take(&mut current));
-                            word_start = true;
-                            break;
-                        }
+                    // env -S has its own expansion grammar; never silently treat it
+                    // as a read-only environment listing.
+                    if executable == "env"
+                        && command_words
+                            .iter()
+                            .any(|word| word == "-S" || word.starts_with("--split-string"))
+                    {
+                        analysis.complete = false;
                     }
                 }
-                ';' | '\n' | '|' => {
-                    if character == '|' && chars.peek() == Some(&'|') {
-                        chars.next();
+                let read_only = shell_segment_is_read_only(&words);
+                analysis.segments.push(ShellSegment { words, read_only });
+            }
+            "file_redirect" => {
+                let raw = node.utf8_text(command.as_bytes()).unwrap_or_default();
+                match shell_words::split(raw) {
+                    Ok(mut words) => {
+                        let read_only = !(0..words.len())
+                            .any(|index| redirects_output_to_file(&words, index))
+                            && !raw.contains("<>");
+                        words.insert(0, String::new());
+                        analysis.segments.push(ShellSegment { words, read_only });
                     }
-                    segments.push(std::mem::take(&mut current));
-                    word_start = true;
+                    Err(_) => analysis.complete = false,
                 }
-                '&' if chars.peek() == Some(&'&') => {
-                    chars.next();
-                    segments.push(std::mem::take(&mut current));
-                    word_start = true;
+            }
+            "heredoc_redirect" => {
+                // Quoted bodies are data unless the receiving command is a shell.
+                // Unquoted command substitutions are independently visited below.
+                let receiver = node
+                    .parent()
+                    .and_then(|parent| parent.child_by_field_name("body"));
+                if receiver.is_some_and(|body| is_shell_receiver(body, command)) {
+                    let mut cursor = node.walk();
+                    let body = node
+                        .named_children(&mut cursor)
+                        .find(|child| child.kind() == "heredoc_body");
+                    if let Some(body) = body {
+                        let nested = analyze_shell_at_depth(
+                            body.utf8_text(command.as_bytes()).unwrap_or_default(),
+                            depth + 1,
+                        );
+                        analysis.complete &= nested.complete;
+                        analysis.segments.extend(nested.segments);
+                    }
                 }
-                _ => {
-                    word_start = matches!(character, ' ' | '\t');
-                    current.push(character);
-                }
-            },
+            }
+            _ => {}
+        }
+        let mut cursor = node.walk();
+        let children: Vec<_> = node.named_children(&mut cursor).collect();
+        pending.extend(children.into_iter().rev());
+    }
+    analysis
+}
+
+fn splice_shell_continuations(command: &str, root: tree_sitter::Node<'_>) -> Option<String> {
+    if !command.contains("\\\n") {
+        return None;
+    }
+    // Bash removes continuations before identifying word/comment boundaries.
+    // The grammar treats a hash after a continuation as a fresh comment, so
+    // splice executable source while retaining literal strings and heredoc data.
+    let mut protected = Vec::new();
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        if matches!(node.kind(), "raw_string" | "heredoc_body" | "comment") {
+            protected.push(node.byte_range());
+        } else {
+            let mut cursor = node.walk();
+            pending.extend(node.named_children(&mut cursor));
         }
     }
-    segments.push(current);
-    segments
+    protected.sort_by_key(|range| range.start);
+    let bytes = command.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    let mut ranges = protected.iter().peekable();
+    while index < bytes.len() {
+        while ranges.peek().is_some_and(|range| range.end <= index) {
+            ranges.next();
+        }
+        if ranges.peek().is_some_and(|range| range.contains(&index)) {
+            output.push(bytes[index]);
+            index += 1;
+        } else if bytes[index] == b'\\' && index + 1 < bytes.len() {
+            if bytes[index + 1] != b'\n' {
+                output.extend_from_slice(&bytes[index..index + 2]);
+            }
+            index += 2;
+        } else {
+            output.push(bytes[index]);
+            index += 1;
+        }
+    }
+    (output != bytes).then(|| String::from_utf8(output).expect("Removing ASCII preserves UTF-8"))
 }
 
-fn shell_segments(command: &str) -> Vec<Vec<String>> {
-    split_shell_command(command)
-        .iter()
-        .map(|segment| shell_words::split(segment).unwrap_or_default())
-        .filter(|segment| !segment.is_empty())
-        .collect()
+fn parsed_command_words(node: tree_sitter::Node<'_>, command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    if let Some(name) = node.child_by_field_name("name") {
+        words.push(shell_word(name, command));
+    }
+    let mut cursor = node.walk();
+    for argument in node.children_by_field_name("argument", &mut cursor) {
+        words.push(shell_word(argument, command));
+    }
+    words
 }
 
-/// The words of a simple command once leading shell control keywords such
-/// as `do`, `then`, or `!` are removed; empty when the segment is only
-/// control flow (`done`, `fi`, `for x in ...`).
+fn is_shell_receiver(mut node: tree_sitter::Node<'_>, command: &str) -> bool {
+    while node.kind() == "pipeline" {
+        let Some(last) = node.named_child(node.named_child_count().saturating_sub(1) as u32) else {
+            return false;
+        };
+        node = last;
+    }
+    let words = parsed_command_words(node, command);
+    command_words(&words).first().is_some_and(|name| {
+        matches!(
+            Path::new(name).file_name().and_then(|name| name.to_str()),
+            Some("sh" | "bash" | "zsh" | "dash" | "ksh")
+        )
+    })
+}
+
+fn shell_word(node: tree_sitter::Node<'_>, command: &str) -> String {
+    let raw = node.utf8_text(command.as_bytes()).unwrap_or_default();
+    match shell_words::split(raw) {
+        Ok(words) if words.len() == 1 => words.into_iter().next().unwrap(),
+        _ => raw.to_string(),
+    }
+}
+
+/// Unwrap commands that forward their arguments to another executable.
 fn command_words(segment: &[String]) -> &[String] {
     let mut words = segment;
     while let Some((first, rest)) = words.split_first() {
-        match first.as_str() {
-            "do" | "then" | "else" | "elif" | "if" | "while" | "until" | "!" | "time" | "{"
-            | "(" => words = rest,
-            "for" | "case" | "select" | "done" | "fi" | "esac" | "}" | ")" => return &[],
+        match Path::new(first)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+        {
+            "env" => {
+                words = rest;
+                while let Some((first, rest)) = words.split_first() {
+                    match first.as_str() {
+                        "-i" | "--ignore-environment" | "--" => words = rest,
+                        "-u" | "--unset" | "-C" | "--chdir" => {
+                            words = rest.get(1..).unwrap_or_default()
+                        }
+                        word if word.starts_with("--unset=")
+                            || word.starts_with("--chdir=")
+                            || (!word.starts_with('-') && word.contains('=')) =>
+                        {
+                            words = rest
+                        }
+                        word if !word.starts_with('-') => break,
+                        _ => return segment,
+                    }
+                }
+            }
+            "command" | "builtin" | "exec" => {
+                words = rest;
+                if words
+                    .first()
+                    .is_some_and(|word| word == "--" || word == "-p")
+                {
+                    words = &words[1..];
+                }
+            }
             _ => return words,
         }
     }
@@ -501,7 +661,7 @@ fn command_words(segment: &[String]) -> &[String] {
 }
 
 fn collect_shell_segment_paths(segment: &[String], working_dir: &Path, paths: &mut Vec<PathBuf>) {
-    for token in command_words(segment).iter().skip(1) {
+    for token in segment.iter().skip(1) {
         if let Some(path) = path_from_shell_token(token) {
             paths.push(resolve(path, working_dir));
         } else if let Some(path) = embedded_redirect_target(token) {
@@ -531,8 +691,8 @@ fn referenced_paths(tool_call: &CallToolRequestParams, working_dir: &Path) -> Ve
         }
     }
     if let Some(command) = args.get("command").and_then(|value| value.as_str()) {
-        for segment in shell_segments(command) {
-            collect_shell_segment_paths(&segment, working_dir, &mut paths);
+        for segment in analyze_shell(command).segments {
+            collect_shell_segment_paths(&segment.words, working_dir, &mut paths);
         }
     }
     paths
@@ -558,9 +718,9 @@ fn mutation_paths(tool_call: &CallToolRequestParams, working_dir: &Path) -> Vec<
         return Vec::new();
     };
     let mut paths = Vec::new();
-    for segment in shell_segments(command) {
-        if !shell_segment_is_read_only(&segment) {
-            collect_shell_segment_paths(&segment, working_dir, &mut paths);
+    for segment in analyze_shell(command).segments {
+        if !segment.read_only {
+            collect_shell_segment_paths(&segment.words, working_dir, &mut paths);
         }
     }
     paths
@@ -630,14 +790,8 @@ fn is_shell_tool(tool_call: &CallToolRequestParams) -> bool {
 }
 
 fn is_confidently_read_only_shell(command: &str) -> bool {
-    if shell_words::split(command).is_err() {
-        return false;
-    }
-    let segments = shell_segments(command);
-    !segments.is_empty()
-        && segments
-            .iter()
-            .all(|segment| shell_segment_is_read_only(segment))
+    let analysis = analyze_shell(command);
+    analysis.complete && analysis.segments.iter().all(|segment| segment.read_only)
 }
 
 /// Whether `token` opens an output redirection (`>`, `>>`, `2>`, `&>`, and
@@ -673,10 +827,8 @@ fn redirects_output_to_file(segment: &[String], index: usize) -> bool {
 }
 
 fn shell_segment_is_read_only(segment: &[String]) -> bool {
-    if (0..segment.len()).any(|index| redirects_output_to_file(segment, index)) {
-        return false;
-    }
-    let Some(executable) = command_words(segment).first() else {
+    let words = command_words(segment);
+    let Some(executable) = words.first() else {
         return true;
     };
     let executable = Path::new(executable)
@@ -686,25 +838,25 @@ fn shell_segment_is_read_only(segment: &[String]) -> bool {
     match executable {
         "cat" | "ls" | "pwd" | "rg" | "grep" | "head" | "tail" | "wc" | "stat" | "file"
         | "echo" | "printf" | "test" | "[" | "true" | "false" | "ps" | "lsof" | "which"
-        | "type" | "env" | "printenv" | "date" | "diff" | "du" | "df" | "basename" | "dirname"
+        | "type" | "printenv" | "date" | "diff" | "du" | "df" | "basename" | "dirname"
         | "realpath" | "readlink" | "jq" | "md5" | "md5sum" | "shasum" | "sha256sum" | "cut"
         | "tr" | "whoami" | "uname" | "hostname" | "id" => true,
-        "sort" => !segment
+        "sort" => !words
             .iter()
             .any(|token| token == "-o" || token.starts_with("-o") || token.starts_with("--output")),
-        "awk" | "gawk" | "mawk" | "nawk" => !segment
+        "awk" | "gawk" | "mawk" | "nawk" => !words
             .iter()
             .any(|token| token.contains('>') || token == "-i" || token.starts_with("--in-place")),
-        "find" => !segment.iter().any(|token| {
+        "find" => !words.iter().any(|token| {
             matches!(
                 token.as_str(),
                 "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir"
             )
         }),
-        "sed" => !segment
+        "sed" => !words
             .iter()
             .any(|token| token == "-i" || token.starts_with("-i")),
-        "git" => segment.get(1).is_some_and(|subcommand| {
+        "git" => words.get(1).is_some_and(|subcommand| {
             matches!(
                 subcommand.as_str(),
                 "diff" | "grep" | "log" | "show" | "status"
@@ -1653,24 +1805,29 @@ mod tests {
         );
     }
 
+    fn shell_segments(command: &str) -> Vec<Vec<String>> {
+        let analysis = analyze_shell(command);
+        assert!(analysis.complete, "{command}");
+        analysis
+            .segments
+            .into_iter()
+            .map(|segment| segment.words)
+            .collect()
+    }
+
     #[test]
     fn segments_split_at_glued_separators_and_newlines() {
         assert_eq!(
-            split_shell_command("head -3 a;printf 'x;y' | wc -l\ncd b && rm c || true"),
+            shell_segments("head -3 a;printf 'x;y' | wc -l\ncd b && rm c || true"),
             vec![
-                "head -3 a",
-                "printf 'x;y' ",
-                " wc -l",
-                "cd b ",
-                " rm c ",
-                " true"
+                vec!["head", "-3", "a"],
+                vec!["printf", "x;y"],
+                vec!["wc", "-l"],
+                vec!["cd", "b"],
+                vec!["rm", "c"],
+                vec!["true"]
             ]
         );
-        assert_eq!(
-            split_shell_command("echo \"a;b\" 2>&1; echo \\; done"),
-            vec!["echo \"a;b\" 2>&1", " echo \\; done"]
-        );
-
         let working_dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
         let outside_file = outside.path().join("notes.md");
@@ -1720,7 +1877,7 @@ mod tests {
         ] {
             assert_eq!(
                 shell_segments(&format!("{comment}\nprintf ok >/dev/null\nls")),
-                vec![vec!["printf", "ok", ">/dev/null"], vec!["ls"]],
+                vec![vec!["printf", "ok"], vec!["", ">/dev/null"], vec!["ls"]],
                 "{comment}"
             );
             assert_eq!(
@@ -1753,7 +1910,13 @@ mod tests {
             "word\u{00a0}#suffix",
         ] {
             let command = format!("printf %s {argument}");
-            assert_eq!(split_shell_command(&command), vec![command]);
+            let parsed = shell_segments(&command);
+            assert_eq!(parsed.len(), 1, "{command}");
+            assert_eq!(
+                parsed[0],
+                shell_words::split(&command).unwrap(),
+                "{command}"
+            );
         }
         assert_eq!(
             shell_segments("printf ok \\\n# unmatched '\nls"),

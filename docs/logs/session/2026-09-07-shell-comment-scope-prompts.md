@@ -133,3 +133,32 @@ Current WDS-GSL-001 status: **source repair test-verified; installed-app verific
 pending**. The seven broader audit findings are reported, not repaired. The stale
 TODO claims are explicitly preserved as reconciliation follow-ups rather than
 rewriting historical evidence during an audit.
+
+## Authorized seven-finding repair and implementation review (2026-09-07)
+
+This checkpoint supersedes the earlier seven-open-findings status. The operator
+authorized repairing all seven, checking the implementation and repairing related
+issues found during that check, while retaining the restriction on app builds.
+
+All seven findings are now source-repaired and test-verified. Changes cover shell
+grammar inspection, request-local egress checking, locked/fresh permission state,
+save-before-dispatch and failure retry, legacy native provider persistence,
+Desktop session/request identity and metadata, and corrected permission-lock
+history. Related revocation, offered-option, replacement and domain-scope defects
+found during review were also repaired. Source ownership and the two self-review
+passes are recorded in the
+[repair report](../../cloud/2026-09-07-permissions-repair.md).
+
+Final validation passed 1,872 core tests (3 opt-in benchmarks ignored), 17 audit
+regressions, 3 inspection integration tests, 3 targeted CLI tests and 86 Desktop
+tests. Core all-target Clippy, Desktop typecheck and translation checks passed.
+Formatting and record checks are recorded with the final repair report. The
+original audit/probe artifacts remain historical evidence; dated addenda point
+to the current dispositions. TODO now distinguishes the old config lock commit
+from the newly tested permission lock.
+
+Status: **source repair and implementation review complete**. The installed app
+is unchanged; no application build, packaging, installation, restart or replay
+of host-changing commands occurred. Tests compiled as authorized. This is scoped
+permission-workflow validation and two reviews by the implementing agent, not
+an independent or repository-wide clean-security verdict.

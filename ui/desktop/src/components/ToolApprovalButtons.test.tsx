@@ -12,6 +12,8 @@ import ToolApprovalButtons from './ToolApprovalButtons';
 vi.mock('../acp/permissionRequests', () => ({
   isAcpPermissionRequestPending: vi.fn(),
   resolveAcpPermissionRequest: vi.fn(),
+  acpPermissionRequestIdentity: (session: string, id: string) => `${session}:${id}`,
+  subscribeAcpPermissionRequests: () => () => {},
 }));
 
 vi.mock('../acp/permissions', () => ({
@@ -51,7 +53,8 @@ describe('ToolApprovalButtons', () => {
     expect(resolveAcpPermissionRequestMock).toHaveBeenCalledWith(
       'session-1',
       'tool-call-approved',
-      'allow_once'
+      'allow_once',
+      expect.any(String)
     );
     expect(screen.getByText('developer__shell - Allowed once')).toBeInTheDocument();
   });
@@ -74,7 +77,8 @@ describe('ToolApprovalButtons', () => {
     expect(resolveAcpPermissionRequestMock).toHaveBeenCalledWith(
       'session-1',
       'tool-call-rerun',
-      'allow_once'
+      'allow_once',
+      expect.any(String)
     );
     expect(screen.getByText('This approval request is no longer active.')).toBeInTheDocument();
     expect(screen.queryByText('developer__shell - Allowed once')).not.toBeInTheDocument();
@@ -134,17 +138,12 @@ describe('ToolApprovalButtons', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Always Allow all developer tools' }));
 
-    expect(callOrder).toEqual([
-      'pending',
-      'listTools',
-      'pending',
-      'setToolPermissions',
-      'resolve',
-    ]);
+    expect(callOrder).toEqual(['pending', 'listTools', 'pending', 'setToolPermissions', 'resolve']);
     expect(resolveAcpPermissionRequestMock).toHaveBeenCalledWith(
       'session-1',
       'tool-call-live',
-      'always_allow'
+      'always_allow',
+      expect.any(String)
     );
     expect(setToolPermissionsMock).toHaveBeenCalledWith([
       { toolName: 'developer__shell', permission: 'always_allow' },
@@ -245,8 +244,11 @@ describe('ToolApprovalButtons', () => {
     expect(resolveAcpPermissionRequestMock).toHaveBeenCalledWith(
       'session-1',
       'tool-call-egress-approve',
-      'always_allow_domain'
+      'always_allow_domain',
+      expect.any(String)
     );
-    expect(screen.getByText('developer__shell - Always allowed (arxiv.org)')).toBeInTheDocument();
+    expect(
+      screen.getByText('developer__shell - Always allow arxiv.org requested')
+    ).toBeInTheDocument();
   });
 });

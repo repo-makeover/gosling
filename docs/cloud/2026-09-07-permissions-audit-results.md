@@ -1,5 +1,9 @@
 # Permission audit: test evidence — 2026-09-07
 
+Repair addendum (2026-09-07): subsequent repairs and passing permanent regressions
+are recorded in the [repair report](2026-09-07-permissions-repair.md). The failed
+probes below remain the historical pre-repair evidence.
+
 Target `0105cd449`. See [audit report](2026-09-07-permissions-audit.md).
 These are observed test results, not passing claims about the defects.
 

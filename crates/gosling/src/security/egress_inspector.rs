@@ -424,7 +424,6 @@ impl ToolInspector for EgressInspector {
         _gosling_mode: GoslingMode,
     ) -> Result<Vec<InspectionResult>> {
         let mut results = Vec::new();
-        let mut seen_destinations: HashSet<String> = HashSet::new();
 
         for tool_request in tool_requests {
             let tool_call = match &tool_request.tool_call {
@@ -443,6 +442,9 @@ impl ToolInspector for EgressInspector {
                 None => continue,
             };
 
+            // Inspection decisions belong to a request, even when another request
+            // in the same batch mentions the identical destination.
+            let mut seen_destinations = HashSet::new();
             let destinations: Vec<_> = extract_destinations(&text)
                 .into_iter()
                 .filter(|d| seen_destinations.insert(d.destination.clone()))
@@ -494,12 +496,25 @@ impl ToolInspector for EgressInspector {
             // A destination is pre-cleared if it is loopback or the user has
             // explicitly always-allowed its domain. Only destinations that are
             // neither still need the direction-based approval gate below.
+            let mut domain_permissions = std::collections::HashMap::new();
+            for dest in &destinations {
+                domain_permissions
+                    .entry(dest.domain.as_str())
+                    .or_insert_with(|| {
+                        self.permission_manager
+                            .get_egress_domain_permission(&dest.domain)
+                    });
+            }
             let is_pre_cleared = |domain: &str| {
                 is_loopback_domain(domain)
-                    || self.permission_manager.get_egress_domain_permission(domain)
-                        == Some(PermissionLevel::AlwaysAllow)
+                    || domain_permissions.get(domain) == Some(&Some(PermissionLevel::AlwaysAllow))
             };
-            let action = if destinations.iter().all(|dest| is_pre_cleared(&dest.domain)) {
+            let action = if domain_permissions
+                .values()
+                .any(|level| *level == Some(PermissionLevel::NeverAllow))
+            {
+                InspectionAction::Deny
+            } else if destinations.iter().all(|dest| is_pre_cleared(&dest.domain)) {
                 InspectionAction::Allow
             } else {
                 match direction {
@@ -513,11 +528,13 @@ impl ToolInspector for EgressInspector {
             // metadata so a later "always allow this domain" response can
             // persist the grant without re-parsing `reason`.
             let metadata = if matches!(action, InspectionAction::RequireApproval(_)) {
-                let domains: Vec<&str> = destinations
+                let mut domains: Vec<&str> = destinations
                     .iter()
                     .filter(|dest| !is_pre_cleared(&dest.domain))
                     .map(|dest| dest.domain.as_str())
                     .collect();
+                domains.sort_unstable();
+                domains.dedup();
                 Some(serde_json::json!({ "domains": domains }))
             } else {
                 None

@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { Button } from './ui/button';
 import type { Permission } from '../types/permissions';
 import {
   isAcpPermissionRequestPending,
   resolveAcpPermissionRequest,
+  acpPermissionRequestIdentity,
+  subscribeAcpPermissionRequests,
 } from '../acp/permissionRequests';
 import { listTools, setToolPermissions } from '../acp/permissions';
 import { defineMessages, useIntl } from '../i18n';
@@ -33,17 +35,17 @@ const i18n = defineMessages({
     id: 'toolApprovalButtons.allowedOnce',
     defaultMessage: 'Allowed once',
   },
-  alwaysAllowed: {
-    id: 'toolApprovalButtons.alwaysAllowed',
-    defaultMessage: 'Always allowed',
+  alwaysAllowRequested: {
+    id: 'toolApprovalButtons.alwaysAllowRequested',
+    defaultMessage: 'Always Allow requested',
   },
   alwaysAllowedExtension: {
     id: 'toolApprovalButtons.alwaysAllowedExtension',
     defaultMessage: 'Always allowed ({extensionName} tools)',
   },
-  alwaysAllowedDomain: {
-    id: 'toolApprovalButtons.alwaysAllowedDomain',
-    defaultMessage: 'Always allowed ({domain})',
+  alwaysAllowDomainRequested: {
+    id: 'toolApprovalButtons.alwaysAllowDomainRequested',
+    defaultMessage: 'Always allow {domain} requested',
   },
   denied: {
     id: 'toolApprovalButtons.denied',
@@ -81,6 +83,7 @@ const globalApprovalState = new Map<
   {
     decision: Permission | null;
     isClicked: boolean;
+    bulkAllowedExtension?: string;
   }
 >();
 
@@ -91,7 +94,7 @@ const MAX_APPROVAL_STATES = 500;
 
 function recordApprovalState(
   id: string,
-  state: { decision: Permission | null; isClicked: boolean }
+  state: { decision: Permission | null; isClicked: boolean; bulkAllowedExtension?: string }
 ) {
   if (!globalApprovalState.has(id) && globalApprovalState.size >= MAX_APPROVAL_STATES) {
     const oldest = globalApprovalState.keys().next().value;
@@ -112,40 +115,49 @@ export interface ToolApprovalData {
 }
 
 export default function ToolApprovalButtons({ data }: { data: ToolApprovalData }) {
+  const requestIdentity = useSyncExternalStore(subscribeAcpPermissionRequests, () =>
+    acpPermissionRequestIdentity(data.sessionId, data.id)
+  );
+  return (
+    <ApprovalRequestButtons key={requestIdentity} data={data} requestIdentity={requestIdentity} />
+  );
+}
+
+function ApprovalRequestButtons({
+  data,
+  requestIdentity,
+}: {
+  data: ToolApprovalData;
+  requestIdentity: string;
+}) {
   const intl = useIntl();
   const { id, toolName, prompt, domain, sessionId, isClicked: initialIsClicked } = data;
 
-  const storedState = globalApprovalState.get(id);
+  const storedState = globalApprovalState.get(requestIdentity);
   const [decision, setDecision] = useState<Permission | null>(storedState?.decision ?? null);
   const [isClicked, setIsClicked] = useState(storedState?.isClicked ?? initialIsClicked ?? false);
   const [approvalError, setApprovalError] = useState<string | null>(null);
   const [isAllowingExtension, setIsAllowingExtension] = useState(false);
-  const [bulkAllowedExtension, setBulkAllowedExtension] = useState<string | null>(null);
+  const [bulkAllowedExtension, setBulkAllowedExtension] = useState<string | null>(
+    storedState?.bulkAllowedExtension ?? null
+  );
 
   const extensionName = extensionNameFromToolName(toolName);
 
-  const setResolvedDecision = (action: Permission) => {
+  const setResolvedDecision = (action: Permission, extension?: string) => {
+    recordApprovalState(requestIdentity, {
+      decision: action,
+      isClicked: true,
+      bulkAllowedExtension: extension,
+    });
     setDecision(action);
     setIsClicked(true);
     setApprovalError(null);
   };
 
-  useEffect(() => {
-    const currentState = globalApprovalState.get(id);
-    if (currentState) {
-      setDecision(currentState.decision);
-      setIsClicked(currentState.isClicked);
-    }
-    setApprovalError(null);
-  }, [id]);
-
-  useEffect(() => {
-    recordApprovalState(id, { decision, isClicked });
-  }, [id, decision, isClicked]);
-
   const handleAction = async (action: Permission) => {
     try {
-      if (resolveAcpPermissionRequest(sessionId, id, action)) {
+      if (resolveAcpPermissionRequest(sessionId, id, action, requestIdentity)) {
         setResolvedDecision(action);
       } else {
         setApprovalError(intl.formatMessage(i18n.staleApprovalRequest));
@@ -164,7 +176,7 @@ export default function ToolApprovalButtons({ data }: { data: ToolApprovalData }
       return;
     }
 
-    if (!isAcpPermissionRequestPending(sessionId, id)) {
+    if (!isAcpPermissionRequestPending(sessionId, id, requestIdentity)) {
       setApprovalError(intl.formatMessage(i18n.staleApprovalRequest));
       return;
     }
@@ -175,19 +187,19 @@ export default function ToolApprovalButtons({ data }: { data: ToolApprovalData }
       const toolPermissions = (tools.length > 0 ? tools.map((t) => t.name) : [toolName]).map(
         (name) => ({ toolName: name, permission: 'always_allow' as const })
       );
-      if (!isAcpPermissionRequestPending(sessionId, id)) {
+      if (!isAcpPermissionRequestPending(sessionId, id, requestIdentity)) {
         setApprovalError(intl.formatMessage(i18n.staleApprovalRequest));
         return;
       }
       await setToolPermissions(toolPermissions);
 
-      if (!resolveAcpPermissionRequest(sessionId, id, 'always_allow')) {
+      if (!resolveAcpPermissionRequest(sessionId, id, 'always_allow', requestIdentity)) {
         setApprovalError(intl.formatMessage(i18n.staleApprovalRequest));
         return;
       }
 
       setBulkAllowedExtension(extensionName);
-      setResolvedDecision('always_allow');
+      setResolvedDecision('always_allow', extensionName);
     } catch (err) {
       console.error('Error allowing extension tools:', err);
       setApprovalError(intl.formatMessage(i18n.failedToAllowExtension));
@@ -204,8 +216,8 @@ export default function ToolApprovalButtons({ data }: { data: ToolApprovalData }
           ? intl.formatMessage(i18n.alwaysAllowedExtension, {
               extensionName: bulkAllowedExtension,
             })
-          : intl.formatMessage(i18n.alwaysAllowed),
-      always_allow_domain: intl.formatMessage(i18n.alwaysAllowedDomain, {
+          : intl.formatMessage(i18n.alwaysAllowRequested),
+      always_allow_domain: intl.formatMessage(i18n.alwaysAllowDomainRequested, {
         domain: domain ?? '',
       }),
       always_deny: intl.formatMessage(i18n.denied),

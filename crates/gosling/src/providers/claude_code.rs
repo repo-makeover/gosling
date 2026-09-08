@@ -26,8 +26,9 @@ use super::base::{
 use super::utils::filter_extensions_from_system_prompt;
 use crate::action_required_manager::{ActionRequiredManager, ElicitationOutcome};
 use crate::config::paths::Paths;
+use crate::config::permission::PermissionLevel;
 use crate::config::search_path::SearchPaths;
-use crate::config::{Config, ExtensionConfig, GoslingMode};
+use crate::config::{Config, ExtensionConfig, GoslingMode, PermissionManager};
 use crate::conversation::message::{Message, MessageContent};
 use crate::permission::permission_confirmation::PrincipalType;
 use crate::permission::{Permission, PermissionConfirmation};
@@ -507,6 +508,8 @@ pub struct ClaudeCodeProvider {
         Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<PermissionConfirmation>>>>,
     #[serde(skip)]
     initial_mode: tokio::sync::Mutex<Option<GoslingMode>>,
+    #[serde(skip)]
+    permission_manager: Arc<PermissionManager>,
 }
 
 impl ClaudeCodeProvider {
@@ -988,6 +991,7 @@ impl ProviderDef for ClaudeCodeProvider {
                 cli_process: tokio::sync::OnceCell::new(),
                 pending_confirmations: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
                 initial_mode: tokio::sync::Mutex::new(None),
+                permission_manager: PermissionManager::instance(),
             })
         })
     }
@@ -1103,6 +1107,8 @@ impl Provider for ClaudeCodeProvider {
         let model_name = model_config.model_name.clone();
         let message_id = uuid::Uuid::new_v4().to_string();
         let pending_confirmations = Arc::clone(&self.pending_confirmations);
+        let permission_manager = Arc::clone(&self.permission_manager);
+        let provider_name = self.name.clone();
         let stream_initial_mode = self
             .initial_mode
             .lock()
@@ -1309,15 +1315,25 @@ impl Provider for ClaudeCodeProvider {
                                         }
 
                                         let mode = stream_initial_mode;
-                                        if matches!(mode, GoslingMode::Auto | GoslingMode::Chat) {
-                                            let perm_resp = if mode == GoslingMode::Auto {
+                                        let saved = permission_manager.get_acp_provider_permission(&provider_name, &tool_name);
+                                        if matches!(mode, GoslingMode::Auto | GoslingMode::Chat)
+                                            || matches!(saved, Some(PermissionLevel::AlwaysAllow | PermissionLevel::NeverAllow))
+                                        {
+                                            let perm_resp = if mode != GoslingMode::Chat
+                                                && saved != Some(PermissionLevel::NeverAllow)
+                                                && (mode == GoslingMode::Auto || saved == Some(PermissionLevel::AlwaysAllow))
+                                            {
                                                 PermissionResponse::Allow {
                                                     updated_input: input,
                                                     tool_use_id,
                                                 }
                                             } else {
                                                 PermissionResponse::Deny {
-                                                    message: "This Gosling session is in chat mode: tools that change anything are disabled. Answer in text instead.".to_string(),
+                                                    message: if mode == GoslingMode::Chat {
+                                                        "This Gosling session is in chat mode: tools that change anything are disabled. Answer in text instead.".to_string()
+                                                    } else {
+                                                        "Saved permission denies this tool call".to_string()
+                                                    },
                                                 }
                                             };
                                             let resp = ControlResponse::success(request_id, perm_resp);
@@ -1335,7 +1351,7 @@ impl Provider for ClaudeCodeProvider {
                                         pending_confirmations.lock().await.insert(request_id.clone(), tx);
 
                                         let action_msg = Message::assistant().with_action_required(
-                                            request_id.clone(), tool_name, input.clone(), None, None,
+                                            request_id.clone(), tool_name.clone(), input.clone(), None, None,
                                         );
                                         yield (Some(action_msg), None);
 
@@ -1344,6 +1360,22 @@ impl Provider for ClaudeCodeProvider {
                                             permission: Permission::Cancel,
                                         });
                                         pending_confirmations.lock().await.remove(&request_id);
+
+                                        let persistent_level = match confirmation.permission {
+                                            Permission::AlwaysAllow => Some(PermissionLevel::AlwaysAllow),
+                                            Permission::AlwaysDeny => Some(PermissionLevel::NeverAllow),
+                                            _ => None,
+                                        };
+                                        if let Some(level) = persistent_level {
+                                            if let Err(error) = permission_manager.update_acp_provider_permission(&provider_name, &tool_name, level) {
+                                                let message = format!("Could not save Claude Code tool permission; the tool was not approved: {error}");
+                                                let response = ControlResponse::success(request_id.clone(), PermissionResponse::Deny { message: message.clone() });
+                                                let mut line = serde_json::to_string(&response).map_err(|error| ProviderError::RequestFailed(error.to_string()))?;
+                                                line.push('\n');
+                                                process.stdin.write_all(line.as_bytes()).await.map_err(|error| ProviderError::RequestFailed(error.to_string()))?;
+                                                Err::<(), _>(ProviderError::RequestFailed(message))?;
+                                            }
+                                        }
 
                                         let perm_resp = match confirmation.permission {
                                             Permission::AlwaysAllow | Permission::AllowOnce => {
@@ -1855,6 +1887,7 @@ mod tests {
             cli_process: tokio::sync::OnceCell::new(),
             pending_confirmations: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             initial_mode: tokio::sync::Mutex::new(None),
+            permission_manager: Arc::new(PermissionManager::new(tempdir().unwrap().keep())),
         }
     }
 
@@ -1935,9 +1968,16 @@ mod tests {
         canned_lines: &[&str],
         mode: GoslingMode,
     ) -> (ClaudeCodeProvider, MessageStream, tokio::io::DuplexStream) {
+        stream_with_provider(canned_lines, mode, make_provider()).await
+    }
+
+    async fn stream_with_provider(
+        canned_lines: &[&str],
+        mode: GoslingMode,
+        provider: ClaudeCodeProvider,
+    ) -> (ClaudeCodeProvider, MessageStream, tokio::io::DuplexStream) {
         let canned_stdout = canned_lines.join("\n");
         let (process, stdin_reader) = make_test_process(&canned_stdout);
-        let provider = make_provider();
         *provider.initial_mode.lock().await = Some(mode);
         let process_arc = Arc::new(tokio::sync::Mutex::new(process));
         provider.cli_process.set(process_arc).unwrap();
@@ -1974,6 +2014,128 @@ mod tests {
             extract_permission_response(&stdin_str, "perm_1"),
             json!({"behavior":"allow","updatedInput":{"query":"rust"},"toolUseID":"tu_1"})
         );
+    }
+
+    #[test_case(Permission::AlwaysAllow, false; "persistent grant")]
+    #[test_case(Permission::AllowOnce, true; "one time grant")]
+    #[tokio::test]
+    async fn native_permission_reuse_matches_the_selected_lifetime(
+        permission: Permission,
+        prompts_again: bool,
+    ) {
+        use futures::StreamExt;
+        let lines = [
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"req_0"}}"#,
+            r#"{"type":"control_request","request_id":"first","request":{"subtype":"can_use_tool","tool_name":"Write","input":{},"tool_use_id":"first-use"}}"#,
+            r#"{"type":"control_request","request_id":"second","request":{"subtype":"can_use_tool","tool_name":"Write","input":{},"tool_use_id":"second-use"}}"#,
+            r#"{"type":"result","result":"Done","usage":{"input_tokens":10,"output_tokens":5}}"#,
+        ];
+        let (provider, mut stream, stdin) = stream_with_canned_stdout(&lines).await;
+        let mut prompts = Vec::new();
+        while let Some(item) = stream.next().await {
+            if let Some(message) = item.unwrap().0 {
+                for content in message.content {
+                    if let MessageContent::ActionRequired(action) = content {
+                        if let crate::conversation::message::ActionRequiredData::ToolConfirmation { id, .. } = action.data {
+                            prompts.push(id.clone());
+                            assert!(provider.handle_permission_confirmation(&id, &PermissionConfirmation {
+                                principal_type: PrincipalType::Tool, permission: permission.clone(),
+                            }).await);
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            prompts,
+            if prompts_again {
+                vec!["first", "second"]
+            } else {
+                vec!["first"]
+            }
+        );
+        drop(stream);
+        let captured = capture_stdin(&provider, stdin).await;
+        assert_eq!(
+            extract_permission_response(&captured, "second")["behavior"],
+            "allow"
+        );
+
+        let mut recreated = make_provider();
+        recreated.permission_manager = Arc::new(PermissionManager::new(
+            provider
+                .permission_manager
+                .get_config_path()
+                .parent()
+                .unwrap()
+                .into(),
+        ));
+        let (recreated, mut stream, stdin) =
+            stream_with_provider(&lines, GoslingMode::Approve, recreated).await;
+        let mut prompt_count = 0;
+        while let Some(item) = stream.next().await {
+            if let Some(message) = item.unwrap().0 {
+                for content in message.content {
+                    if let MessageContent::ActionRequired(action) = content {
+                        if let crate::conversation::message::ActionRequiredData::ToolConfirmation { id, .. } = action.data {
+                            prompt_count += 1;
+                            recreated.handle_permission_confirmation(&id, &PermissionConfirmation {
+                                principal_type: PrincipalType::Tool, permission: Permission::AllowOnce,
+                            }).await;
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(prompt_count, if prompts_again { 2 } else { 0 });
+        drop(stream);
+        let captured = capture_stdin(&recreated, stdin).await;
+        assert_eq!(
+            extract_permission_response(&captured, "first")["behavior"],
+            "allow"
+        );
+    }
+
+    #[tokio::test]
+    async fn native_permission_save_failure_reports_error_and_answers_the_waiting_cli() {
+        use futures::StreamExt;
+        let (provider, mut stream, stdin) = stream_with_canned_stdout(&[
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"req_0"}}"#,
+            r#"{"type":"control_request","request_id":"permission","request":{"subtype":"can_use_tool","tool_name":"Write","input":{},"tool_use_id":"use"}}"#,
+            r#"{"type":"result","result":"Done","usage":{"input_tokens":10,"output_tokens":5}}"#,
+        ]).await;
+        loop {
+            let item = stream.next().await.unwrap().unwrap();
+            if item.0.is_some_and(|message| {
+                message
+                    .content
+                    .iter()
+                    .any(|c| c.as_action_required().is_some())
+            }) {
+                break;
+            }
+        }
+        std::fs::create_dir(provider.permission_manager.get_config_path()).unwrap();
+        provider
+            .handle_permission_confirmation(
+                "permission",
+                &PermissionConfirmation {
+                    principal_type: PrincipalType::Tool,
+                    permission: Permission::AlwaysAllow,
+                },
+            )
+            .await;
+        let error = stream.next().await.unwrap().unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Could not save Claude Code tool permission"));
+        drop(stream);
+        let captured = capture_stdin(&provider, stdin).await;
+        assert_eq!(
+            extract_permission_response(&captured, "permission")["behavior"],
+            "deny"
+        );
+        assert!(provider.pending_confirmations.lock().await.is_empty());
     }
 
     async fn capture_stdin(

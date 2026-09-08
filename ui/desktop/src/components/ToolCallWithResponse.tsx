@@ -311,6 +311,7 @@ export default function ToolCallWithResponse({
                   id: confirmationContent.id,
                   toolName: confirmationContent.toolName,
                   prompt: confirmationContent.prompt ?? undefined,
+                  domain: confirmationContent.domain ?? undefined,
                   sessionId,
                   isClicked: isApprovalClicked,
                 }}

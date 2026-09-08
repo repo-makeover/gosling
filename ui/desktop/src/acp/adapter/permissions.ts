@@ -7,6 +7,7 @@ import {
   messageUpserted,
   rawInputToArguments,
   toolIdentity,
+  isRecord,
 } from './shared';
 
 export function applyPermissionRequest(
@@ -14,7 +15,7 @@ export function applyPermissionRequest(
   request: RequestPermissionRequest
 ): AcpChatStateChange[] {
   const toolCallId = request.toolCall.toolCallId;
-  const existing = state.messages.some((message) =>
+  const existingIndex = state.messages.findIndex((message) =>
     message.content.some(
       (content) =>
         content.type === 'actionRequired' &&
@@ -22,12 +23,17 @@ export function applyPermissionRequest(
         content.data.id === toolCallId
     )
   );
-  if (existing) {
-    return [];
-  }
 
   const identity = toolIdentity(request.toolCall);
   const prompt = permissionPrompt(request);
+  const meta = request.toolCall._meta;
+  const gosling = isRecord(meta) && isRecord(meta.gosling) ? meta.gosling : undefined;
+  const permission = gosling && isRecord(gosling.permission) ? gosling.permission : undefined;
+  const domain =
+    request.options.some((option) => option.optionId === 'allow_always_domain') &&
+    typeof permission?.domain === 'string'
+      ? permission.domain
+      : undefined;
 
   const message: Message = {
     id: `acp_permission_${toolCallId}`,
@@ -42,12 +48,17 @@ export function applyPermissionRequest(
           toolName: identity.toolName ?? request.toolCall.title ?? toolCallId,
           arguments: rawInputToArguments(request.toolCall.rawInput),
           ...(prompt ? { prompt } : {}),
+          ...(domain ? { domain } : {}),
         },
       },
     ],
     metadata: { ...DEFAULT_VISIBLE_MESSAGE_METADATA },
   };
-  state.messages.push(message);
+  if (existingIndex >= 0) {
+    state.messages[existingIndex] = message;
+  } else {
+    state.messages.push(message);
+  }
 
   return [messageUpserted(state, message)];
 }

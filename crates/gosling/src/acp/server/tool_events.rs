@@ -416,7 +416,18 @@ impl GoslingAcpAgent {
         let tool_call_update = ToolCallUpdate::new(
             ToolCallId::new(presentation::project_identifier(&request_id)),
             fields,
-        );
+        )
+        .meta(Some(
+            serde_json::json!({
+                "gosling": {
+                    "toolCall": { "toolName": presentation::project_identifier(&tool_name) },
+                    "permission": { "domain": domain },
+                }
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        ));
 
         fn option(kind: PermissionOptionKind) -> PermissionOption {
             let id = serde_json::to_value(kind)

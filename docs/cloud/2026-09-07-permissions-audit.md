@@ -1,5 +1,11 @@
 # Permissions audit suite — 2026-09-07
 
+Repair addendum (2026-09-07): all seven findings below are now source-repaired
+and test-verified. The [repair report](2026-09-07-permissions-repair.md) records
+the implementation reviews, related repairs and final validation. The installed
+application remains unchanged. The following audit is preserved as the
+pre-repair evidence snapshot; its open statuses describe that earlier checkpoint.
+
 Status: scoped audit and authorized tests completed, with open findings. Existing
 tests pass; isolated probes reproduce defects. Findings were recorded before tests
 and reconciled with their results. This is a permission-focused audit of all 13

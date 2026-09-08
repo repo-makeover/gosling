@@ -114,57 +114,83 @@ impl Agent {
                 let single_flagged_domain =
                     single_flagged_domain_for_request(&request.id, inspection_results);
 
-                let mut mode_changes = self.gosling_mode_changes.subscribe();
-                let confirmation_rx = self.tool_confirmation_router.register(request.id.clone()).await;
-                let auto_approve = self.gosling_mode().await == crate::config::GoslingMode::Auto
-                    && security_message.is_none();
+                let confirmation = loop {
+                    let mut mode_changes = self.gosling_mode_changes.subscribe();
+                    let confirmation_rx = self.tool_confirmation_router.register(request.id.clone()).await;
+                    let auto_approve = self.gosling_mode().await == crate::config::GoslingMode::Auto
+                        && security_message.is_none();
 
-                let action_required_msg = Message::assistant()
-                    .with_action_required(
-                        request.id.clone(),
-                        tool_call.name.to_string().clone(),
-                        tool_call.arguments.clone().unwrap_or_default(),
-                        security_message.clone(),
-                        single_flagged_domain.clone(),
-                    )
-                    .user_only();
-                if !auto_approve {
-                    yield action_required_msg;
-                }
-
-                let confirmation = if auto_approve {
-                    PermissionConfirmation {
-                        principal_type: PrincipalType::Tool,
-                        permission: Permission::AllowOnce,
+                    let action_required_msg = Message::assistant()
+                        .with_action_required(
+                            request.id.clone(),
+                            tool_call.name.to_string().clone(),
+                            tool_call.arguments.clone().unwrap_or_default(),
+                            security_message.clone(),
+                            single_flagged_domain.clone(),
+                        )
+                        .user_only();
+                    if !auto_approve {
+                        yield action_required_msg;
                     }
-                } else {
-                    let mut confirmation_rx = confirmation_rx;
-                    loop {
-                        tokio::select! {
-                            confirmation_result = &mut confirmation_rx => {
-                                break match confirmation_result {
-                                    Ok(confirmation) => confirmation,
-                                    Err(_) => PermissionConfirmation {
-                                        principal_type: PrincipalType::Tool,
-                                        permission: Permission::AlwaysDeny,
-                                    },
-                                };
-                            }
-                            changed = mode_changes.changed(), if security_message.is_none() => {
-                                if changed.is_ok() && *mode_changes.borrow() == crate::config::GoslingMode::Auto {
-                                    break PermissionConfirmation {
-                                        principal_type: PrincipalType::Tool,
-                                        permission: Permission::AllowOnce,
+
+                    let confirmation = if auto_approve {
+                        PermissionConfirmation {
+                            principal_type: PrincipalType::Tool,
+                            permission: Permission::AllowOnce,
+                        }
+                    } else {
+                        let mut confirmation_rx = confirmation_rx;
+                        loop {
+                            tokio::select! {
+                                confirmation_result = &mut confirmation_rx => {
+                                    break match confirmation_result {
+                                        Ok(confirmation) => confirmation,
+                                        Err(_) => PermissionConfirmation {
+                                            principal_type: PrincipalType::Tool,
+                                            permission: Permission::Cancel,
+                                        },
                                     };
+                                }
+                                changed = mode_changes.changed(), if security_message.is_none() => {
+                                    if changed.is_ok() && *mode_changes.borrow() == crate::config::GoslingMode::Auto {
+                                        break PermissionConfirmation {
+                                            principal_type: PrincipalType::Tool,
+                                            permission: Permission::AllowOnce,
+                                        };
+                                    }
                                 }
                             }
                         }
+                    };
+
+                    let saved = match confirmation.permission {
+                        Permission::AlwaysAllow if security_message.is_some() => {
+                            Err(anyhow::anyhow!("This security approval cannot grant tool-wide permission"))
+                        }
+                        Permission::AlwaysAllow => self.tool_inspection_manager
+                            .update_permission_manager(&tool_call.name, PermissionLevel::AlwaysAllow).await,
+                        Permission::AlwaysAllowDomain => match &single_flagged_domain {
+                            Some(domain) => self.tool_inspection_manager
+                                .update_egress_domain_permission(domain, PermissionLevel::AlwaysAllow).await,
+                            None => Err(anyhow::anyhow!("This request has no single domain to approve")),
+                        },
+                        Permission::AlwaysDeny => self.tool_inspection_manager
+                            .update_permission_manager(&tool_call.name, PermissionLevel::NeverAllow).await,
+                        _ => Ok(()),
+                    };
+                    if let Err(error) = saved {
+                        yield Message::assistant().with_text(format!(
+                            "Could not save the permission for {}: {error}. The tool has not run. Retry the permission decision or choose a one-time decision.",
+                            tool_call.name,
+                        )).user_only();
+                        continue;
                     }
+                    break confirmation;
                 };
 
                 if let Some(finding_id) = get_security_finding_id_from_results(&request.id, inspection_results) {
                     let action = match confirmation.permission {
-                        Permission::AllowOnce | Permission::AlwaysAllow => "ALLOW",
+                        Permission::AllowOnce | Permission::AlwaysAllow | Permission::AlwaysAllowDomain => "ALLOW",
                         _ => "BLOCK",
                     };
                     tracing::info!(
@@ -196,32 +222,12 @@ impl Agent {
                             futures::future::ready(Err(e)),
                         ),
                     }));
-
-                    if confirmation.permission == Permission::AlwaysAllow {
-                        self.tool_inspection_manager
-                            .update_permission_manager(&tool_call.name, PermissionLevel::AlwaysAllow)
-                            .await;
-                    } else if confirmation.permission == Permission::AlwaysAllowDomain {
-                        if let Some(domain) = &single_flagged_domain {
-                            self.tool_inspection_manager
-                                .update_egress_domain_permission(domain, PermissionLevel::AlwaysAllow)
-                                .await;
-                        }
-                    }
-                } else {
-                    if let Some(response) = request_to_response_map.get_mut(&request.id) {
-                        response.add_tool_response_with_metadata(
-                            request.id.clone(),
-                            Ok(CallToolResult::error(vec![Content::text(DECLINED_RESPONSE)])),
-                            request.metadata.as_ref(),
-                        );
-                    }
-
-                    if confirmation.permission == Permission::AlwaysDeny {
-                        self.tool_inspection_manager
-                            .update_permission_manager(&tool_call.name, PermissionLevel::NeverAllow)
-                            .await;
-                    }
+                } else if let Some(response) = request_to_response_map.get_mut(&request.id) {
+                    response.add_tool_response_with_metadata(
+                        request.id.clone(),
+                        Ok(CallToolResult::error(vec![Content::text(DECLINED_RESPONSE)])),
+                        request.metadata.as_ref(),
+                    );
                 }
             }
         }
@@ -309,5 +315,143 @@ impl Agent {
             }
         }
         .boxed()
+    }
+}
+
+#[cfg(test)]
+mod permission_regression_tests {
+    use super::*;
+    use crate::agents::{AgentConfig, GoslingPlatform};
+    use crate::config::{GoslingMode, PermissionManager};
+    use crate::session::{SessionManager, SessionType};
+    use rmcp::model::CallToolRequestParams;
+    use std::sync::Arc;
+
+    #[test_case::test_case(Permission::AlwaysAllow; "tool grant")]
+    #[test_case::test_case(Permission::AlwaysAllowDomain; "domain grant")]
+    #[test_case::test_case(Permission::AlwaysDeny; "persistent denial")]
+    #[tokio::test]
+    async fn hosted_save_failure_keeps_dispatch_pending_and_retries_only_the_decision(
+        permission: Permission,
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let permissions = Arc::new(PermissionManager::new(root.path().join("config")));
+        let sessions = Arc::new(SessionManager::new(root.path().join("sessions")));
+        let session = sessions
+            .create_session(
+                root.path().into(),
+                "permission retry".into(),
+                SessionType::Hidden,
+                GoslingMode::Approve,
+            )
+            .await
+            .unwrap();
+        let agent = Agent::with_config(AgentConfig::new(
+            sessions,
+            permissions.clone(),
+            GoslingMode::Approve,
+            true,
+            GoslingPlatform::GoslingCli,
+        ));
+        let request = ToolRequest {
+            id: "retry".into(),
+            tool_call: Ok(CallToolRequestParams::new("fixture__unavailable")),
+            metadata: None,
+            tool_meta: None,
+        };
+        let requests = vec![request];
+        let inspections = if permission == Permission::AlwaysAllowDomain {
+            vec![crate::tool_inspection::InspectionResult {
+                tool_request_id: "retry".into(),
+                action: crate::tool_inspection::InspectionAction::RequireApproval(Some(
+                    "egress".into(),
+                )),
+                reason: "egress".into(),
+                confidence: 1.0,
+                inspector_name: "egress".into(),
+                finding_id: None,
+                metadata: Some(serde_json::json!({"domains": ["audit.invalid"]})),
+            }]
+        } else {
+            vec![]
+        };
+        let mut futures = Vec::new();
+        let mut responses = HashMap::from([("retry".into(), Message::user())]);
+        std::fs::create_dir(permissions.get_config_path()).unwrap();
+        let mut approval = agent.handle_approval_tool_requests(
+            &requests,
+            &mut futures,
+            &mut responses,
+            None,
+            &session,
+            &inspections,
+        );
+        assert!(approval
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .content
+            .iter()
+            .any(|c| c.as_action_required().is_some()));
+        agent
+            .handle_confirmation(
+                "retry".into(),
+                PermissionConfirmation {
+                    principal_type: PrincipalType::Tool,
+                    permission: permission.clone(),
+                },
+            )
+            .await;
+        let error = approval.next().await.unwrap().unwrap();
+        assert!(error
+            .as_concat_text()
+            .contains("Could not save the permission"));
+        assert!(error.as_concat_text().contains("The tool has not run"));
+        assert!(approval
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .content
+            .iter()
+            .any(|c| c.as_action_required().is_some()));
+        std::fs::remove_dir(permissions.get_config_path()).unwrap();
+        agent
+            .handle_confirmation(
+                "retry".into(),
+                PermissionConfirmation {
+                    principal_type: PrincipalType::Tool,
+                    permission: permission.clone(),
+                },
+            )
+            .await;
+        assert!(approval.next().await.is_none());
+        drop(approval);
+        if permission == Permission::AlwaysDeny {
+            assert!(futures.is_empty());
+            assert_eq!(
+                permissions.get_user_permission("fixture__unavailable"),
+                Some(PermissionLevel::NeverAllow)
+            );
+        } else {
+            // The absent fixture tool produces one dispatch error, and never executes a host command.
+            assert_eq!(futures.len(), 1);
+            if permission == Permission::AlwaysAllowDomain {
+                assert_eq!(
+                    permissions.get_egress_domain_permission("audit.invalid"),
+                    Some(PermissionLevel::AlwaysAllow)
+                );
+                assert_eq!(
+                    permissions.get_user_permission("fixture__unavailable"),
+                    None
+                );
+            } else {
+                assert_eq!(
+                    permissions.get_user_permission("fixture__unavailable"),
+                    Some(PermissionLevel::AlwaysAllow)
+                );
+            }
+        }
     }
 }

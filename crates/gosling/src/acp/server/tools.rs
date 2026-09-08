@@ -157,7 +157,7 @@ mod tests {
     use gosling_sdk_types::custom_requests::ToolPermissionEntry;
 
     #[test]
-    fn permission_persist_failure_is_an_acp_error_and_rolls_back_memory() {
+    fn permission_persist_failure_is_an_acp_error_and_fails_closed() {
         let temp_dir = tempfile::tempdir().unwrap();
         let manager = PermissionManager::new(temp_dir.path().to_path_buf());
         std::fs::create_dir(manager.get_config_path()).unwrap();
@@ -169,6 +169,9 @@ mod tests {
         };
 
         assert!(persist_tool_permissions(&manager, &request).is_err());
-        assert_eq!(manager.get_user_permission("developer__shell"), None);
+        assert_eq!(
+            manager.get_user_permission("developer__shell"),
+            Some(crate::config::permission::PermissionLevel::NeverAllow)
+        );
     }
 }
