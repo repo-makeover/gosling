@@ -46,6 +46,14 @@ ACP operation, whose server-owned session ID is the persistence and enforcement 
   operator turns on "restrict tools to working directories", which also prompts for out-of-scope
   reads. Read-only shell segments (`cat`, `ls`, `grep`, ...) are judged separately from the
   segments that follow them in a pipeline. Read-only workspace roots are still denied outright.
+- Amended 2026-09-08 at the operator's request: unrestricted workspace sessions also allow
+  temporary scratch paths under the runtime's OS temp directory and Unix `/tmp` and `/var/tmp`.
+  Canonicalization handles aliases such as macOS `/private/tmp`; targets escaping through
+  symlinks or parent traversal are checked against their resolved destinations. The temp roots
+  themselves are not included in this exception. Every mutation destination is checked, so a
+  scratch write cannot conceal another out-of-scope write. Explicit directory restriction and
+  read-only workspace policy still take precedence. This allowance does not persist a folder
+  grant, change workspace definitions, or authorize renderer file access.
 - Existing workspace folder permissions remain pinned. Removing or replacing workspace roots still
   requires starting a new session from an updated workspace.
 - This is an application capability boundary, not an operating-system ACL. Separate local programs

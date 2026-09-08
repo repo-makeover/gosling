@@ -29,6 +29,192 @@ fn shell_request(id: &str, command: &str) -> ToolRequest {
     }
 }
 
+#[tokio::test]
+async fn workspace_scratch_redirections_do_not_require_approval() {
+    let root = tempfile::tempdir().unwrap();
+    let (sessions, session) = workspace(&root, WorkspaceFolderAccess::ReadWrite).await;
+    let inspector = WorkingDirScopeInspector::new(sessions);
+    let scratch_roots = vec![std::env::temp_dir()];
+    #[cfg(unix)]
+    let scratch_roots = scratch_roots
+        .into_iter()
+        .chain(["/tmp", "/var/tmp"].map(std::path::PathBuf::from))
+        .collect::<Vec<_>>();
+    for scratch in scratch_roots {
+        let target = scratch.join(format!("gosling-agents-read-{}", uuid::Uuid::now_v7()));
+        let command = format!(
+            "cat AGENTS.md >'{}'; wc -l AGENTS.md Outputs/report.md",
+            target.display()
+        );
+        let results = inspector
+            .inspect(
+                &session.id,
+                &[shell_request("scratch", &command)],
+                &[],
+                GoslingMode::Auto,
+            )
+            .await
+            .unwrap();
+        assert!(results.is_empty(), "scratch write prompted: {results:?}");
+        assert!(!target.exists(), "inspection must not execute the command");
+    }
+}
+
+// Inspection-only targets must be outside temp storage now that scratch writes are allowed.
+fn non_temporary_target(name: &str) -> std::path::PathBuf {
+    let cwd = std::env::current_dir().unwrap();
+    cwd.ancestors()
+        .last()
+        .unwrap()
+        .join(format!("gosling-scope-regression-{}", uuid::Uuid::now_v7()))
+        .join(name)
+}
+
+#[tokio::test]
+async fn workspace_scratch_allowance_checks_every_destination() {
+    let root = tempfile::tempdir().unwrap();
+    let (sessions, session) = workspace(&root, WorkspaceFolderAccess::ReadWrite).await;
+    let inspector = WorkingDirScopeInspector::new(sessions);
+    let scratch = root.path().join("scratch.txt");
+    let outside = non_temporary_target("report.md");
+    let command = format!(
+        "cat AGENTS.md >'{}'; printf x >'{}'",
+        scratch.display(),
+        outside.display()
+    );
+    let results = inspector
+        .inspect(
+            &session.id,
+            &[shell_request("mixed", &command)],
+            &[],
+            GoslingMode::Auto,
+        )
+        .await
+        .unwrap();
+    assert_eq!(results.len(), 1);
+    match &results[0].action {
+        InspectionAction::RequireApproval(Some(message)) => {
+            assert!(message.contains(outside.to_str().unwrap()), "{message}");
+        }
+        other => panic!("expected approval for the non-temp write, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn workspace_scratch_structured_writes_preserve_read_only_roots() {
+    let root = tempfile::tempdir().unwrap();
+    let (sessions, session) = workspace(&root, WorkspaceFolderAccess::Read).await;
+    let inspector = WorkingDirScopeInspector::new(sessions);
+    for (target, denied) in [
+        (root.path().join("scratch.txt"), false),
+        (session.working_dir.join("protected.txt"), true),
+    ] {
+        let request = ToolRequest {
+            id: "write".into(),
+            tool_call: Ok(
+                CallToolRequestParams::new("developer__text_editor__write".to_string())
+                    .with_arguments(
+                        serde_json::json!({"path": target, "content": "scratch"})
+                            .as_object()
+                            .unwrap()
+                            .clone(),
+                    ),
+            ),
+            metadata: None,
+            tool_meta: None,
+        };
+        let results = inspector
+            .inspect(&session.id, &[request], &[], GoslingMode::Auto)
+            .await
+            .unwrap();
+        if denied {
+            assert_eq!(results[0].action, InspectionAction::Deny);
+        } else {
+            assert!(results.is_empty(), "scratch write prompted: {results:?}");
+        }
+        assert!(!target.exists(), "inspection must not write a file");
+    }
+}
+
+#[tokio::test]
+async fn workspace_scratch_allowance_does_not_override_explicit_restriction() {
+    let root = tempfile::tempdir().unwrap();
+    let (sessions, session) = workspace(&root, WorkspaceFolderAccess::ReadWrite).await;
+    sessions
+        .update(&session.id)
+        .restrict_tools_to_working_dirs(true)
+        .apply()
+        .await
+        .unwrap();
+    let results = WorkingDirScopeInspector::new(sessions)
+        .inspect(
+            &session.id,
+            &[shell_request(
+                "restricted-scratch",
+                &format!("printf x >'{}'", root.path().join("scratch.txt").display()),
+            )],
+            &[],
+            GoslingMode::Auto,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        results[0].action,
+        InspectionAction::RequireApproval(_)
+    ));
+}
+
+#[tokio::test]
+async fn workspace_scratch_allowance_does_not_grant_the_temp_root_itself() {
+    let root = tempfile::tempdir().unwrap();
+    let (sessions, session) = workspace(&root, WorkspaceFolderAccess::ReadWrite).await;
+    let results = WorkingDirScopeInspector::new(sessions)
+        .inspect(
+            &session.id,
+            &[shell_request(
+                "temp-root",
+                &format!("rm -rf '{}'", std::env::temp_dir().display()),
+            )],
+            &[],
+            GoslingMode::Auto,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        results[0].action,
+        InspectionAction::RequireApproval(_)
+    ));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn workspace_scratch_allowance_rejects_symlink_escape() {
+    let root = tempfile::tempdir().unwrap();
+    let (sessions, session) = workspace(&root, WorkspaceFolderAccess::ReadWrite).await;
+    let outside = non_temporary_target("private.txt");
+    let link = root.path().join("redirect");
+    std::os::unix::fs::symlink("/", &link).unwrap();
+    let target = link.join(outside.strip_prefix("/").unwrap());
+    let results = WorkingDirScopeInspector::new(sessions)
+        .inspect(
+            &session.id,
+            &[shell_request(
+                "escaped",
+                &format!("printf x >'{}'", target.display()),
+            )],
+            &[],
+            GoslingMode::Auto,
+        )
+        .await
+        .unwrap();
+    match &results[0].action {
+        InspectionAction::RequireApproval(Some(message)) => {
+            assert!(message.contains(outside.to_str().unwrap()), "{message}");
+        }
+        other => panic!("expected approval for the escaped write, got {other:?}"),
+    }
+}
+
 async fn workspace(
     root: &TempDir,
     access: WorkspaceFolderAccess,
@@ -306,7 +492,7 @@ async fn literal_heredoc_does_not_hide_a_later_outside_write() {
     let root = tempfile::tempdir().unwrap();
     let (sessions, session) = workspace(&root, WorkspaceFolderAccess::ReadWrite).await;
     let inspector = WorkingDirScopeInspector::new(sessions);
-    let target = root.path().join("outside");
+    let target = non_temporary_target("outside");
     let command = format!(
         "cat <<'EOF'\nDon't panic\nEOF\nprintf x > '{}'",
         target.display()
@@ -403,7 +589,7 @@ async fn shell_syntax_preserves_executable_mutations_and_literal_data() {
     let root = tempfile::tempdir().unwrap();
     let (sessions, session) = workspace(&root, WorkspaceFolderAccess::ReadWrite).await;
     let inspector = WorkingDirScopeInspector::new(sessions);
-    let outside = root.path().join("outside");
+    let outside = non_temporary_target("outside");
     let target = outside.to_str().unwrap();
     let mutations = [
         format!("env -i FOO=x touch '{target}'"),

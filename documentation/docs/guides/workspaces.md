@@ -106,6 +106,11 @@ another account.
 Legacy sessions without a workspace ID remain resumable and appear with the default/unassigned
 session behavior. Session search still works across workspaces when **All workspaces** is selected.
 
+Temporary scratch files can be used without a workspace-scope approval when **Restrict tools to
+working directories** is off. This includes the system temp folder, Unix `/tmp` and `/var/tmp`,
+and their macOS aliases. Writes elsewhere still follow the workspace folder rules. Turning the
+restriction on also restricts scratch access; read-only workspace folders remain protected.
+
 ## Product outputs and exports
 
 The agent receives named output paths and product types as structured, non-secret session context.

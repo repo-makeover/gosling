@@ -1,5 +1,14 @@
 # TODO
 
+## 2026-09-08 temporary scratch approvals
+
+- [x] **WDS-TMP-001** — Allow ordinary temporary scratch paths in unrestricted workspace
+      sessions, including `/tmp` and its macOS alias. The triggering redirection failed before
+      the fix and passed afterward; 32 scope unit tests and 23 permission regressions passed.
+      Explicit restriction, read-only roots, and non-temp writes retain their guards. See the
+      [repair record](logs/session/2026-09-08-temporary-scratch-permissions.md).
+      Source validated; installed-app replacement is pending the next build/install step.
+
 ## 2026-09-08 recurring output-preview repair
 
 - [x] **ART-PREVIEW-001** — Restore the live Desktop entrypoint's use of validated

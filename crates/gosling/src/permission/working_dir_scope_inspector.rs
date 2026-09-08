@@ -16,8 +16,9 @@ use std::sync::Arc;
 /// in through `Session::restrict_tools_to_working_dirs`; workspace sessions
 /// always enforce their saved folder policy. With the restriction on, every
 /// out-of-scope path requires approval. A workspace session with it off still
-/// requires approval for out-of-scope mutations, while out-of-scope reads
-/// pass. Mutations under read-only workspace roots are denied outright.
+/// requires approval for out-of-scope mutations except temporary scratch
+/// paths, while out-of-scope reads pass. Mutations under read-only workspace
+/// roots are denied outright.
 pub struct WorkingDirScopeInspector {
     session_manager: Arc<SessionManager>,
 }
@@ -49,6 +50,11 @@ impl ToolInspector for WorkingDirScopeInspector {
         let mut allowed_dirs = Vec::with_capacity(1 + session.additional_working_dirs.len());
         allowed_dirs.push(session.working_dir.clone());
         allowed_dirs.extend(session.additional_working_dirs.iter().cloned());
+        let scratch_dirs = if session.restrict_tools_to_working_dirs {
+            Vec::new()
+        } else {
+            temporary_scratch_dirs()
+        };
 
         let mut results = Vec::new();
         for request in tool_requests {
@@ -119,7 +125,8 @@ impl ToolInspector for WorkingDirScopeInspector {
             } else {
                 mutation_paths(tool_call, &session.working_dir)
             };
-            let Some(path) = out_of_scope_path(&candidate_paths, &allowed_dirs)? else {
+            let Some(path) = out_of_scope_path(&candidate_paths, &allowed_dirs, &scratch_dirs)?
+            else {
                 continue;
             };
 
@@ -226,6 +233,20 @@ fn canonicalize_potential_path(path: &Path) -> Result<PathBuf> {
 fn canonical_allowed_dirs(dirs: &[PathBuf]) -> Vec<PathBuf> {
     dirs.iter()
         .filter_map(|dir| canonicalize_potential_path(dir).ok())
+        .collect()
+}
+
+fn temporary_scratch_dirs() -> Vec<PathBuf> {
+    let dirs = vec![std::env::temp_dir()];
+    // macOS tools also use /tmp even when TMPDIR points to a per-user directory.
+    #[cfg(unix)]
+    let dirs = dirs
+        .into_iter()
+        .chain(["/tmp", "/var/tmp"].map(PathBuf::from))
+        .collect::<Vec<_>>();
+    canonical_allowed_dirs(&dirs)
+        .into_iter()
+        .filter(|dir| dir.parent().is_some())
         .collect()
 }
 
@@ -883,10 +904,24 @@ fn shell_segment_is_read_only(segment: &[String]) -> bool {
 /// any. Callers only pass explicit `path` arguments and explicit absolute or
 /// relative shell paths; ambiguous path-free calls are left alone rather than
 /// guessed at.
-fn out_of_scope_path(paths: &[PathBuf], allowed_dirs: &[PathBuf]) -> Result<Option<PathBuf>> {
+fn out_of_scope_path(
+    paths: &[PathBuf],
+    allowed_dirs: &[PathBuf],
+    scratch_dirs: &[PathBuf],
+) -> Result<Option<PathBuf>> {
     for resolved in paths {
+        let canonical_path = canonicalize_potential_path(resolved)?;
+        // Compare resolved targets so a temp symlink cannot exempt an outside write.
+        // The temp directories themselves are not scratch entries.
+        if !scratch_dirs.contains(&canonical_path)
+            && scratch_dirs
+                .iter()
+                .any(|dir| canonical_path.starts_with(dir))
+        {
+            continue;
+        }
         if !is_within_any(resolved, allowed_dirs)? {
-            return Ok(Some(canonicalize_potential_path(resolved)?));
+            return Ok(Some(canonical_path));
         }
     }
 
@@ -903,7 +938,17 @@ mod tests {
         working_dir: &Path,
         allowed_dirs: &[PathBuf],
     ) -> Result<Option<PathBuf>> {
-        super::out_of_scope_path(&referenced_paths(tool_call, working_dir), allowed_dirs)
+        super::out_of_scope_path(&referenced_paths(tool_call, working_dir), allowed_dirs, &[])
+    }
+
+    // These paths are only inspected, never created; temp storage is a separate allowance.
+    fn non_temporary_target(name: &str) -> PathBuf {
+        let cwd = std::env::current_dir().unwrap();
+        cwd.ancestors()
+            .last()
+            .unwrap()
+            .join(format!("gosling-scope-regression-{}", uuid::Uuid::now_v7()))
+            .join(name)
     }
 
     fn tool_call(name: &str, args: JsonObject) -> CallToolRequestParams {
@@ -1361,9 +1406,8 @@ mod tests {
     async fn workspace_session_root_is_not_granted_to_a_sibling_session() {
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("project");
-        let private = root.path().join("private");
+        let private = non_temporary_target("private");
         std::fs::create_dir_all(&project).unwrap();
-        std::fs::create_dir_all(&private).unwrap();
 
         let session_manager = Arc::new(SessionManager::new(root.path().to_path_buf()));
         let selected = session_manager
@@ -1665,6 +1709,7 @@ mod tests {
         std::fs::create_dir_all(&reference).unwrap();
         let notes = reference.join("notes.md");
         std::fs::write(&notes, "reference").unwrap();
+        let outside = non_temporary_target("outside");
 
         let session_manager = Arc::new(SessionManager::new(root.path().to_path_buf()));
         let session = workspace_session(&session_manager, &project).await;
@@ -1680,13 +1725,10 @@ mod tests {
                         "cat-then-script",
                         &format!("cat {}; python3 - <<'PY'\nprint(1)\nPY", notes.display()),
                     ),
-                    write_request(
-                        "write-outside",
-                        reference.join("draft.md").to_str().unwrap(),
-                    ),
+                    write_request("write-outside", outside.join("draft.md").to_str().unwrap()),
                     shell_request(
                         "shell-write-outside",
-                        &format!("touch {}", reference.join("touched.md").display()),
+                        &format!("touch {}", outside.join("touched.md").display()),
                     ),
                 ],
                 &[],
@@ -1753,7 +1795,7 @@ mod tests {
     fn shell_mutation_out_of_scope(command: &str, working_dir: &Path) -> Option<PathBuf> {
         let call = tool_call("developer__shell", json_args(&[("command", command)]));
         let allowed = vec![working_dir.to_path_buf()];
-        super::out_of_scope_path(&mutation_paths(&call, working_dir), &allowed).unwrap()
+        super::out_of_scope_path(&mutation_paths(&call, working_dir), &allowed, &[]).unwrap()
     }
 
     #[test]
@@ -1950,7 +1992,7 @@ mod tests {
             print('ready')\nPY\n\
             curl --fail --max-time 10 -sS http://127.0.0.1:18998/ >/dev/null\n\
             launchctl print gui/$(id -u)/local.mac-demand.test | grep -E 'state =|pid =|runs ='";
-        let outside = root.path().join("outside.txt");
+        let outside = non_temporary_target("outside.txt");
         let results = inspector
             .inspect(
                 &session.id,
@@ -1997,6 +2039,7 @@ mod tests {
         std::fs::create_dir_all(library.join("logs")).unwrap();
         let log = library.join("logs").join("service.log");
         std::fs::write(&log, "log").unwrap();
+        let outside = non_temporary_target("outside");
 
         let session_manager = Arc::new(SessionManager::new(root.path().to_path_buf()));
         let session = workspace_session(&session_manager, &project).await;
@@ -2042,13 +2085,13 @@ mod tests {
                     ),
                     shell_request(
                         "write-outside",
-                        &format!("printf 'x' >> {}", library.join("draft.md").display()),
+                        &format!("printf 'x' >> {}", outside.join("draft.md").display()),
                     ),
                     shell_request(
                         "awk-write-outside",
                         &format!(
                             "ps -o pid | awk '{{print > \"{}\"}}'",
-                            library.join("pids.txt").display()
+                            outside.join("pids.txt").display()
                         ),
                     ),
                 ],
