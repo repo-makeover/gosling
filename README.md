@@ -40,15 +40,15 @@ gosling's current source includes these controls. Their presence is not a securi
 * **Option Injection Protection**: Added `--` end-of-options guards to `git clone` during plugin installation, preventing command/option injection attacks via malicious URL strings starting with a hyphen.
 * **Persisted Permission Denials**: A stored denial takes precedence over an allow in the same policy category; unreadable permission state is treated as denied. Ordinary actions can still proceed automatically in Autonomous mode.
 
-### Feature comparison (Goose v1.49.0 vs. gosling v1.2.2)
+### Feature comparison (Goose v1.49.0 vs. gosling v1.2.3)
 
 Checked **2026-09-08** against [Goose's latest stable release, v1.49.0](https://github.com/aaif-goose/goose/releases/tag/v1.49.0)
-(published September 3) and gosling's current local source/build version, `v1.2.2`.
+(published September 3) and gosling's current local source/build version, `v1.2.3`.
 These are source observations, not runtime parity or security certification.
 The [detailed comparison](documentation/docs/guides/goose-comparison.md) pins the
 upstream commit, links the evidence, and records the refresh procedure.
 
-| Feature | Goose v1.49.0 | gosling v1.2.2 |
+| Feature | Goose v1.49.0 | gosling v1.2.3 |
 |---|---|---|
 | **Agent, MCP, and providers** | Chat/tool loops, MCP extensions, cloud and local-service providers | Same capability categories; provider and extension coverage must be checked individually |
 | **Local models** | Ollama plus integrated llama.cpp inference and optional MLX support | Ollama and other configured services; no bundled inference runtime |
@@ -65,6 +65,10 @@ gosling also provides Desktop workspace credential profiles and a session **Outp
 inventory. In `v1.2.2`, **Hide repository files** hides recognized source/project files
 and files within repository directories. See [Workspaces and Outputs](documentation/docs/guides/workspaces.md#product-outputs-and-exports)
 for extension settings, previews, and filter behavior.
+
+`v1.2.3` adds file timestamps, workspace readiness dots, output contributor/revision history,
+and a separate **Copy contents** action for complete text documents. It also fixes modal layering
+and unnecessary workspace approval prompts for ordinary temporary scratch files.
 
 ## What's included
 
@@ -107,7 +111,7 @@ The Rust core owns agent execution, provider contracts, permissions, session per
 
 The current validation reference is the [2026-08-15 live playtest](docs/cloud/2026-08-15-live-all-scenarios-playtest.md): 58 pass, 5 fail, 47 blocked across all 110 scenario cards. Blocked is dominated by Desktop cards, which had no GUI driver — that is missing coverage, not a pass. The [2026-08-15 audit](docs/cloud/2026-08-15-master-report.md) and its [repair campaign](docs/logs/session/2026-08-16-audit-repair-campaign.md) record what was found and what has been fixed since.
 
-Current source/local-build version: `v1.2.2`. See the [v1.2.2 build notes](documentation/docs/release-notes/v1.2.2.md) for the Outputs repository filter. This local version bump does not publish a GitHub release. The [v1.2.1 release notes](documentation/docs/release-notes/v1.2.1.md) retain the preceding release reference. The source-tree gates — workspace format, Clippy, the full Rust suite, and the Desktop typecheck and tests — passed on 2026-09-06. The maintainer-owned installed-Desktop, signing, and artifact gates in the [release checklist](RELEASE_CHECKLIST.md) are tracked there and are not claimed by this line. The preceding stable GitHub release uses the noncanonical tag `v1.0.1-optimization-and-workspaces`; that historical discrepancy remains documented in the [release process](RELEASE.md) and will not be repaired by moving an existing tag.
+Current source/local-build version: `v1.2.3`. See the [v1.2.3 build notes](documentation/docs/release-notes/v1.2.3.md) for the latest Outputs and sidebar changes. This local version bump does not publish a GitHub release. The [v1.2.2 build notes](documentation/docs/release-notes/v1.2.2.md) retain the preceding local-build record. These changes received focused tests and build checks; the full suite was not rerun. The source-tree gates — workspace format, Clippy, the full Rust suite, and the Desktop typecheck and tests — passed on 2026-09-06. The maintainer-owned installed-Desktop, signing, and artifact gates in the [release checklist](RELEASE_CHECKLIST.md) are tracked there and are not claimed by this line. The preceding stable GitHub release uses the noncanonical tag `v1.0.1-optimization-and-workspaces`; that historical discrepancy remains documented in the [release process](RELEASE.md) and will not be repaired by moving an existing tag.
 
 ## Known limits
 
@@ -151,7 +155,7 @@ for configuration, trust, and removal guidance.
 ## Quick links
 
 - [Documentation index](documentation/INDEX.md) - user manuals, architecture, publishing, and stewardship
-- [v1.2.2 local build notes](documentation/docs/release-notes/v1.2.2.md), [v1.2.1 notes](documentation/docs/release-notes/v1.2.1.md), and [release-note archive](documentation/docs/release-notes/)
+- [v1.2.3 local build notes](documentation/docs/release-notes/v1.2.3.md), [v1.2.2 notes](documentation/docs/release-notes/v1.2.2.md), and [release-note archive](documentation/docs/release-notes/)
 - [Release process](RELEASE.md) and [release checklist](RELEASE_CHECKLIST.md)
 - [Known issues](documentation/docs/troubleshooting/known-issues.md)
 - [Current validation ledger](docs/polish/test-ledger.md)

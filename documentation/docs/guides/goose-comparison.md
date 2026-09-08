@@ -1,6 +1,6 @@
 ---
 title: Goose and gosling feature comparison
-description: Dated source comparison of Goose v1.49.0 and gosling v1.2.2, including shared features and implementation differences.
+description: Dated source comparison of Goose v1.49.0 and gosling v1.2.3, including shared features and implementation differences.
 ---
 
 # Goose and gosling feature comparison
@@ -11,10 +11,10 @@ Last checked: **2026-09-08**.
   non-prerelease returned by GitHub's release API. Source was checked out at
   `71fc4be1ed729e26b1dc0a4466abdd03be548a53`; all upstream source links below pin
   that commit. Later `main` commits are outside this comparison.
-- **gosling:** the local `v1.2.2` working tree, based on commit
-  `f5a910578` plus the Outputs repository-filter changes. `Cargo.toml` and
-  `ui/desktop/package.json` declare `1.2.2`. This identifies source/local-build
-  behavior, not a published GitHub release. See the [v1.2.2 notes](../release-notes/v1.2.2.md).
+- **gosling:** the local `v1.2.3` working tree, based on commit
+  `2186fab44` plus version/documentation updates. `Cargo.toml` and
+  `ui/desktop/package.json` declare `1.2.3`. This identifies source/local-build
+  behavior, not a published GitHub release. See the [v1.2.3 notes](../release-notes/v1.2.3.md).
 
 This is a source review of the listed features. It does not establish identical
 behavior across providers, MCP servers, operating systems, or packaged builds.
@@ -26,7 +26,7 @@ three-feature import; use this page for the current comparison.
 The gosling paths identify files in this source tree. Upstream links identify the
 corresponding evidence in the pinned Goose release.
 
-| Capability | Goose v1.49.0 | gosling v1.2.2 and source |
+| Capability | Goose v1.49.0 | gosling v1.2.3 and source |
 |---|---|---|
 | Agent and MCP | Chat/tool execution and configurable MCP extensions. [Extension configuration][goose-extension]. | Chat/tool execution and MCP extensions in `crates/gosling/src/agents/`. Catalog discovery intentionally retains the AAIF compatibility adapter; support varies by extension and transport. |
 | Cloud and local-service providers | Configurable providers, including [Ollama][goose-ollama]. | Configurable providers, including Ollama in `crates/gosling/src/providers/ollama_def.rs`. Provider counts do not imply identical authentication, model catalogs, or feature support. |
@@ -42,7 +42,7 @@ corresponding evidence in the pinned Goose release.
 
 ## Security behavior checked
 
-| Control | Goose v1.49.0 | gosling v1.2.2 |
+| Control | Goose v1.49.0 | gosling v1.2.3 |
 |---|---|---|
 | An enabled inspector returns an error | The [inspection manager][goose-inspection] logs the error and continues to other inspectors without adding a fallback verdict. | `crates/gosling/src/tool_inspection.rs` adds `RequireApproval` for every affected request, including in Autonomous mode. |
 | A tool is stored in both allow and deny lists within a policy category | [Permission lookup][goose-permission] checks `never_allow` first. | `crates/gosling/src/config/permission.rs` also checks `never_allow` first. This protection is shared. |
@@ -76,6 +76,12 @@ implementation is in `ui/desktop/src/components/artifacts/ArtifactPane.tsx`,
 `ui/desktop/src/utils/artifactRepository.ts`, and
 `ui/desktop/src/main/fileIpc.ts`. See the [Outputs guide](workspaces.md#filter-repository-files)
 for exact filter behavior and unavailable-file handling.
+
+The `v1.2.3` local update adds filesystem timestamps to Outputs and Library rows, workspace
+readiness indicators, output contributor/model attribution with saved revisions, and a separate
+**Copy contents** action for complete UTF-8 text files. These additions are documented in the
+[Outputs guide](workspaces.md#output-agents-and-revision-history); they do not change the pinned
+Goose evidence or establish runtime parity with Goose.
 
 ## Refreshing this comparison
 

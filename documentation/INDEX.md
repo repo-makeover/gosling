@@ -18,13 +18,14 @@ This file is the durable map for the repository's documentation surface.
 - [getting started](./docs/getting-started/)
 - [guides](./docs/guides/)
 - [workspaces guide](./docs/guides/workspaces.md)
-- [Goose and gosling feature comparison](./docs/guides/goose-comparison.md) — Goose v1.49.0 / gosling v1.2.2, checked 2026-09-08
+- [Goose and gosling feature comparison](./docs/guides/goose-comparison.md) — Goose v1.49.0 / gosling v1.2.3, checked 2026-09-08
 - [historical Goose v1.47 compatibility record](./docs/guides/goose-v1-47-compatibility.md)
 - [troubleshooting](./docs/troubleshooting/)
 - [v1.0.0 release notes](./docs/release-notes/v1.0.0.md)
 - [v1.1.0 candidate notes](./docs/release-notes/v1.1.0.md)
 - [v1.2.1 source notes](./docs/release-notes/v1.2.1.md)
 - [v1.2.2 local build notes](./docs/release-notes/v1.2.2.md)
+- [v1.2.3 local build notes](./docs/release-notes/v1.2.3.md)
 - [release-note archive](./docs/release-notes/)
 - [tutorials](./docs/tutorials/)
 - [experimental](./docs/experimental/)
@@ -56,7 +57,7 @@ This file is the durable map for the repository's documentation surface.
 - Root `README.md` is the product entry point; `documentation/README.md` is the docs-site build and publishing guide.
 - Session-share deep links are documented with the `gosling://` scheme only. Legacy `goose://` share-link compatibility is not part of the current docs contract.
 - Durable documentation governance artifacts currently live in this directory as point-in-time records rather than a full log/archive program.
-- The current source/local-build version is `v1.2.2` as of 2026-09-08. It does not identify the version available from a published channel. Validation, tagging, signing, publication, and updater promotion remain separate release gates; see [the release process](../RELEASE.md).
+- The current source/local-build version is `v1.2.3` as of 2026-09-08. It does not identify the version available from a published channel. Validation, tagging, signing, publication, and updater promotion remain separate release gates; see [the release process](../RELEASE.md).
 
 ## follow-up disposition
 
