@@ -95,3 +95,41 @@ authorization. Next: run the targeted `working_dir_scope_inspector` tests and
 `tool_inspection_manager_tests`, then the relevant Rust lint/build checks and a
 backed-up server installation if authorized. Do not execute the stored launchctl
 command as a replay against live services.
+
+## Authorized audit and test follow-up (2026-09-07)
+
+This checkpoint supersedes the earlier pending test-authorization status above.
+The operator requested another full audit suite followed by tests and explicitly
+said not to build the app yet. The shell-comment repair is now committed as
+`0105cd449`. No further production code was changed in this follow-up.
+
+- All 13 catalog base audit lenses were applied to the permission workflow, with
+  205 taxonomy dispositions and explicit runtime/specialist coverage limits.
+- Seven additional findings remain open: shell grammar gaps, batch egress
+  deduplication, independent-writer/stale-reader permission state, swallowed
+  persistent-save errors, cross-session UI approval state, legacy Claude Code
+  ignoring Always Allow persistence, and a stale permission-lock completion claim.
+- The 32 scope regression tests pass, including all three tests from the source
+  repair. The full Gosling library run passed 1,864 tests with 3 opt-in benchmarks
+  ignored. Inspection integration and CLI noninteractive suites each passed 3.
+- Existing Desktop approval/request and lifecycle tests passed 80 tests total;
+  Desktop typechecking passed.
+- Isolated audit probes produced 6 Rust invariant failures and 1 React failure,
+  confirming open defects; two Rust probes passed (a benign-comment control and
+  characterization of a swallowed permission-save failure). The report separates
+  component/inspector reproduction from untested installed-app consequences.
+- Test-only compilation occurred. No application/release build, packaging,
+  installation, restart or live host-command replay occurred.
+- The temporary runner files were removed after preserving byte-identical probe
+  sources under `docs/cloud/`; the application source and permanent tests retain
+  no changes from this follow-up. Formatting and final artifact checks passed.
+
+Evidence: [full audit](../../cloud/2026-09-07-permissions-audit.md),
+[test results](../../cloud/2026-09-07-permissions-audit-results.md),
+[Rust probes](../../cloud/2026-09-07-permissions-audit-probes.rs), and
+[React probe](../../cloud/2026-09-07-permissions-audit-ui-probe.tsx).
+
+Current WDS-GSL-001 status: **source repair test-verified; installed-app verification
+pending**. The seven broader audit findings are reported, not repaired. The stale
+TODO claims are explicitly preserved as reconciliation follow-ups rather than
+rewriting historical evidence during an audit.
