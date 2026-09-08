@@ -212,3 +212,22 @@ Prettier and diff checks passed. Source review was performed by the implementing
 agent; larger-file splitting remains deferred under the operator's constraint.
 No application build, packaging, reinstall, backup or restart occurred in this
 readability pass. Test compilation was part of validation.
+
+### Previous-pass recheck and five more files (2026-09-08)
+
+Rechecked committed `9dc07049e` against the previous readability report and
+reran its validation: no regression found. The six prior source files remain
+byte-identical. The operator then authorized the same work in five additional
+files: `permission_inspector.rs`, `permission_judge.rs`, `tool_class.rs`,
+`acp/adapter/permissions.ts` and `acp/adapter/elicitations.ts`.
+
+Local naming and intent/contract comments are clearer. All private helper
+renames stay within their owning source file; public interfaces, prompts,
+classification tables, test modules and runtime behavior are preserved.
+The [follow-up report](../../polish/2026-09-08-permission-readability-followup.md)
+records the manifest, all 18 POL dispositions and per-file/full validation.
+
+Before/after results match: 1,872 core passes (3 ignored benchmarks), 20
+integration passes and 86 Desktop passes. Clippy, typecheck, Rustfmt, Prettier
+and final diff/record checks passed. Review was by the implementing agent.
+No application build, reinstall, backup, restart or cross-file refactor occurred.

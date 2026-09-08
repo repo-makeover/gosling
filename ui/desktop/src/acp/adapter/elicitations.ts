@@ -13,7 +13,8 @@ export function applyElicitationRequest(
   state: AdapterState,
   request: AcpElicitationRequest
 ): AcpChatStateChange[] {
-  if (hasExistingElicitation(state, request.id)) {
+  // Reapplying an ID must preserve the existing form and its submitted/cancelled state.
+  if (hasElicitationMessage(state, request.id)) {
     return [];
   }
 
@@ -44,46 +45,47 @@ export function applyElicitationStatus(
   elicitationId: string,
   status: ElicitationStatus
 ): AcpChatStateChange[] {
-  const statusData = {
+  const statusFlags = {
     isSubmitted: status === 'submitted',
     isCancelled: status === 'cancelled',
   };
-  const changes: AcpChatStateChange[] = [];
+  const messageChanges: AcpChatStateChange[] = [];
 
-  state.messages = state.messages.map((message, index) => {
-    let messageChanged = false;
-    const content = message.content.map((content) => {
+  state.messages = state.messages.map((message, messageIndex) => {
+    let hasMatchingElicitation = false;
+    const updatedContent = message.content.map((contentBlock) => {
       if (
-        content.type !== 'actionRequired' ||
-        content.data.actionType !== 'elicitation' ||
-        content.data.id !== elicitationId
+        contentBlock.type !== 'actionRequired' ||
+        contentBlock.data.actionType !== 'elicitation' ||
+        contentBlock.data.id !== elicitationId
       ) {
-        return content;
+        return contentBlock;
       }
 
-      messageChanged = true;
+      hasMatchingElicitation = true;
       return {
-        ...content,
+        ...contentBlock,
         data: {
-          ...content.data,
-          ...statusData,
+          ...contentBlock.data,
+          ...statusFlags,
         },
       };
     });
 
-    if (!messageChanged) {
+    if (!hasMatchingElicitation) {
       return message;
     }
 
-    const updatedMessage = { ...message, content };
-    changes.push(messageUpserted(state, updatedMessage, index));
+    const updatedMessage = { ...message, content: updatedContent };
+    // The replacement is not in state.messages yet, so report its original position explicitly.
+    messageChanges.push(messageUpserted(state, updatedMessage, messageIndex));
     return updatedMessage;
   });
 
-  return changes;
+  return messageChanges;
 }
 
-function hasExistingElicitation(state: AdapterState, elicitationId: string): boolean {
+function hasElicitationMessage(state: AdapterState, elicitationId: string): boolean {
   return state.messages.some((message: Message) =>
     message.content.some(
       (content) =>

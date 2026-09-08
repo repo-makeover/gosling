@@ -15,7 +15,7 @@ export function applyPermissionRequest(
   request: RequestPermissionRequest
 ): AcpChatStateChange[] {
   const toolCallId = request.toolCall.toolCallId;
-  const existingIndex = state.messages.findIndex((message) =>
+  const existingMessageIndex = state.messages.findIndex((message) =>
     message.content.some(
       (content) =>
         content.type === 'actionRequired' &&
@@ -25,17 +25,24 @@ export function applyPermissionRequest(
   );
 
   const identity = toolIdentity(request.toolCall);
-  const prompt = permissionPrompt(request);
-  const meta = request.toolCall._meta;
-  const gosling = isRecord(meta) && isRecord(meta.gosling) ? meta.gosling : undefined;
-  const permission = gosling && isRecord(gosling.permission) ? gosling.permission : undefined;
+  const prompt = firstPermissionPromptText(request);
+  const toolMetadata = request.toolCall._meta;
+  const goslingMetadata =
+    isRecord(toolMetadata) && isRecord(toolMetadata.gosling) ? toolMetadata.gosling : undefined;
+  const permissionMetadata =
+    goslingMetadata && isRecord(goslingMetadata.permission)
+      ? goslingMetadata.permission
+      : undefined;
+  // Metadata alone cannot offer a domain grant; the request must include that choice.
+  const offersDomainApproval = request.options.some(
+    (option) => option.optionId === 'allow_always_domain'
+  );
   const domain =
-    request.options.some((option) => option.optionId === 'allow_always_domain') &&
-    typeof permission?.domain === 'string'
-      ? permission.domain
+    offersDomainApproval && typeof permissionMetadata?.domain === 'string'
+      ? permissionMetadata.domain
       : undefined;
 
-  const message: Message = {
+  const permissionMessage: Message = {
     id: `acp_permission_${toolCallId}`,
     role: 'assistant',
     created: Math.floor(Date.now() / 1000),
@@ -54,16 +61,17 @@ export function applyPermissionRequest(
     ],
     metadata: { ...DEFAULT_VISIBLE_MESSAGE_METADATA },
   };
-  if (existingIndex >= 0) {
-    state.messages[existingIndex] = message;
+  // A reused tool-call ID may carry a new prompt; refresh its existing message.
+  if (existingMessageIndex >= 0) {
+    state.messages[existingMessageIndex] = permissionMessage;
   } else {
-    state.messages.push(message);
+    state.messages.push(permissionMessage);
   }
 
-  return [messageUpserted(state, message)];
+  return [messageUpserted(state, permissionMessage)];
 }
 
-function permissionPrompt(request: RequestPermissionRequest): string | undefined {
+function firstPermissionPromptText(request: RequestPermissionRequest): string | undefined {
   for (const content of request.toolCall.content ?? []) {
     if (content.type === 'content' && content.content.type === 'text') {
       return content.content.text;

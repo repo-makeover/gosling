@@ -10,6 +10,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
+const READ_ONLY_JUDGE_TOOL_NAME: &str = "platform__tool_by_tool_permission";
+
+// Session settings keep the judge aligned with the active conversation; global
+// settings are the fallback when the session's model configuration is unavailable.
 async fn resolve_model_config(
     session_manager: &crate::session::SessionManager,
     session_id: &str,
@@ -34,13 +38,12 @@ async fn resolve_model_config(
 
 #[derive(Serialize)]
 struct PermissionJudgeContext {
-    // Empty struct for now since the current template doesn't need variables
+    // Keep an object-shaped template context even while it has no variables.
 }
 
-/// Creates the tool definition for checking read-only permissions.
-fn create_read_only_tool() -> Tool {
+fn create_read_only_judge_tool() -> Tool {
     Tool::new(
-        "platform__tool_by_tool_permission".to_string(),
+        READ_ONLY_JUDGE_TOOL_NAME.to_string(),
         indoc! {r#"
             Analyze the tool requests and determine which ones perform read-only operations.
 
@@ -93,12 +96,12 @@ fn create_read_only_tool() -> Tool {
 fn create_check_messages(tool_requests: Vec<&ToolRequest>) -> Conversation {
     let tool_calls: Vec<String> = tool_requests
         .iter()
-        .filter_map(|req| {
-            let tool_call = req.tool_call.as_ref().ok()?;
+        .filter_map(|request| {
+            let tool_call = request.tool_call.as_ref().ok()?;
             let arguments = tool_call
                 .arguments
                 .as_ref()
-                .map(|args| serde_json::to_string(args).unwrap_or_default())
+                .map(|arguments| serde_json::to_string(arguments).unwrap_or_default())
                 .unwrap_or_default();
             Some(format!("{}({})", tool_call.name, arguments))
         })
@@ -121,12 +124,12 @@ fn create_check_messages(tool_requests: Vec<&ToolRequest>) -> Conversation {
     Conversation::new_unvalidated(check_messages)
 }
 
-/// Processes the response to extract the list of tools with read-only operations.
-fn extract_read_only_tools(response: &Message) -> Option<Vec<String>> {
+/// Uses the first judge call with an array verdict; prose and unrelated calls are ignored.
+fn extract_read_only_tool_names(response: &Message) -> Option<Vec<String>> {
     for content in &response.content {
         if let MessageContent::ToolRequest(tool_request) = content {
             if let Ok(tool_call) = &tool_request.tool_call {
-                if tool_call.name == "platform__tool_by_tool_permission" {
+                if tool_call.name == READ_ONLY_JUDGE_TOOL_NAME {
                     if let Some(arguments) = &tool_call.arguments {
                         if let Some(Value::Array(read_only_tools)) =
                             arguments.get("read_only_tools")
@@ -146,7 +149,8 @@ fn extract_read_only_tools(response: &Message) -> Option<Vec<String>> {
     None
 }
 
-/// Executes the read-only tools detection and returns the list of tools with read-only operations.
+/// Returns the model's suggested read-only tool names; callers still enforce permission policy.
+/// Configuration resolution errors, completion errors or an unusable verdict yield an empty list.
 pub async fn detect_read_only_tools(
     provider: Arc<dyn Provider>,
     session_manager: &crate::session::SessionManager,
@@ -156,8 +160,8 @@ pub async fn detect_read_only_tools(
     if tool_requests.is_empty() {
         return vec![];
     }
-    let tool = create_read_only_tool();
-    let check_messages = create_check_messages(tool_requests);
+    let judge_tool = create_read_only_judge_tool();
+    let judge_messages = create_check_messages(tool_requests);
 
     let context = PermissionJudgeContext {};
     let system_prompt = render_template("permission_judge.md", &context)
@@ -170,20 +174,19 @@ pub async fn detect_read_only_tools(
             return vec![];
         }
     };
-    let res = crate::session_context::with_session_id(
+    let judge_response = crate::session_context::with_session_id(
         Some(session_id.to_string()),
         provider.complete(
             &model_config,
             &system_prompt,
-            check_messages.messages(),
-            std::slice::from_ref(&tool),
+            judge_messages.messages(),
+            std::slice::from_ref(&judge_tool),
         ),
     )
     .await;
 
-    // Process the response and return an empty vector if the response is invalid
-    if let Ok((message, _usage)) = res {
-        extract_read_only_tools(&message).unwrap_or_default()
+    if let Ok((message, _usage)) = judge_response {
+        extract_read_only_tool_names(&message).unwrap_or_default()
     } else {
         vec![]
     }

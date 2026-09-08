@@ -12,7 +12,7 @@ use rmcp::model::Tool;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-/// Permission Inspector that handles tool permission checking
+/// Combines stored tool policy, execution mode and SmartApprove classification.
 pub struct PermissionInspector {
     pub permission_manager: Arc<PermissionManager>,
     provider: SharedProvider,
@@ -38,9 +38,8 @@ impl PermissionInspector {
         self.permission_manager.apply_tool_annotations(tools);
     }
 
-    /// Process inspection results into permission decisions
-    /// This method takes all inspection results and converts them into a PermissionCheckResult
-    /// that can be used by the agent to determine which tools to approve, deny, or ask for approval
+    /// Builds the permission baseline in request order, then applies other inspectors' restrictions.
+    /// A request without a permission result requires approval.
     pub fn process_inspection_results(
         &self,
         remaining_requests: &[ToolRequest],
@@ -48,57 +47,51 @@ impl PermissionInspector {
     ) -> PermissionCheckResult {
         use crate::tool_inspection::apply_inspection_results_to_permissions;
 
-        // Start with permission inspector's decisions as the baseline
-        let mut permission_check_result = PermissionCheckResult {
+        let mut decisions = PermissionCheckResult {
             approved: vec![],
             needs_approval: vec![],
             denied: vec![],
         };
 
-        // Apply permission inspector results first (baseline behavior)
-        let permission_results: Vec<_> = inspection_results
+        let baseline_results: Vec<_> = inspection_results
             .iter()
             .filter(|result| result.inspector_name == "permission")
             .collect();
 
         for request in remaining_requests {
-            // Find the permission decision for this request
-            if let Some(permission_result) = permission_results
+            if let Some(permission_result) = baseline_results
                 .iter()
                 .find(|result| result.tool_request_id == request.id)
             {
                 match permission_result.action {
                     InspectionAction::Allow => {
-                        permission_check_result.approved.push(request.clone());
+                        decisions.approved.push(request.clone());
                     }
                     InspectionAction::Deny => {
-                        permission_check_result.denied.push(request.clone());
+                        decisions.denied.push(request.clone());
                     }
                     InspectionAction::RequireApproval(_) => {
-                        permission_check_result.needs_approval.push(request.clone());
+                        decisions.needs_approval.push(request.clone());
                     }
                 }
             } else {
-                // If no permission result found, default to needs approval for safety
-                permission_check_result.needs_approval.push(request.clone());
+                decisions.needs_approval.push(request.clone());
             }
         }
 
-        // Apply security and other inspector results as overrides
-        let non_permission_results: Vec<_> = inspection_results
+        // Other inspectors can tighten the baseline, but an Allow cannot relax it.
+        let other_inspector_results: Vec<_> = inspection_results
             .iter()
             .filter(|result| result.inspector_name != "permission")
             .cloned()
             .collect();
 
-        if !non_permission_results.is_empty() {
-            permission_check_result = apply_inspection_results_to_permissions(
-                permission_check_result,
-                &non_permission_results,
-            );
+        if !other_inspector_results.is_empty() {
+            decisions =
+                apply_inspection_results_to_permissions(decisions, &other_inspector_results);
         }
 
-        permission_check_result
+        decisions
     }
 }
 
@@ -121,7 +114,7 @@ impl ToolInspector for PermissionInspector {
     ) -> Result<Vec<InspectionResult>> {
         let mut results = Vec::new();
         let permission_manager = &self.permission_manager;
-        let mut llm_detect_candidates: Vec<&ToolRequest> = Vec::new();
+        let mut read_only_candidates: Vec<&ToolRequest> = Vec::new();
 
         for request in tool_requests {
             if let Ok(tool_call) = &request.tool_call {
@@ -131,13 +124,9 @@ impl ToolInspector for PermissionInspector {
                     continue;
                 }
 
-                // An explicit user permission for this specific tool must hold in
-                // every mode, including Auto. Auto is used unconditionally for
-                // subagents (AOC-ORCH-001) regardless of the delegating session's
-                // own mode, so skipping this check for Auto silently bypassed any
-                // NeverAllow/AlwaysAllow the user had configured. Auto has nothing
-                // that can answer an approval prompt, so an explicit AskBefore
-                // degrades to Deny rather than being silently dropped.
+                // Stored policy precedes mode defaults so delegated Auto calls cannot
+                // bypass a saved restriction. This branch denies AskBefore in Auto;
+                // other inspectors retain their own approval gates. (AOC-ORCH-001)
                 let (action, reason) =
                     if let Some(level) = permission_manager.get_user_permission(tool_name) {
                         match level {
@@ -161,14 +150,9 @@ impl ToolInspector for PermissionInspector {
                             ),
                         }
                     } else if gosling_mode == GoslingMode::Auto {
-                        // Auto runs with no operator attached (subagents,
-                        // plan-act, headless), so an implicit grant here is a
-                        // confused deputy: a delegating parent that merely
-                        // enabled an extension would hand the child write and
-                        // shell authority it never named. Execution and write
-                        // tools with execution, mutation, egress, extension
-                        // management, or mixed-action authority now need an
-                        // explicit user permission; ordinary reads stay allowed.
+                        // Enabling an extension does not grant its side-effecting
+                        // tools to a delegated Auto call; recognized risky names
+                        // still need an explicit permission.
                         // (SEC-GOS-003, LLM-GSL-001, AOC-GOS-001, NEG-GSL-001)
                         if tool_class::requires_explicit_grant_in_auto(tool_name) {
                             (
@@ -202,7 +186,7 @@ impl ToolInspector for PermissionInspector {
                         && permission_manager.get_smart_approve_permission(tool_name)
                             != Some(PermissionLevel::AskBefore)
                     {
-                        llm_detect_candidates.push(request);
+                        read_only_candidates.push(request);
                         continue;
                     } else {
                         (
@@ -215,7 +199,7 @@ impl ToolInspector for PermissionInspector {
                     tool_request_id: request.id.clone(),
                     action,
                     reason,
-                    confidence: 1.0, // Permission decisions are definitive
+                    confidence: 1.0,
                     inspector_name: self.name().to_string(),
                     finding_id: None,
                     metadata: None,
@@ -223,62 +207,59 @@ impl ToolInspector for PermissionInspector {
             }
         }
 
-        // LLM-based read-only detection for deferred SmartApprove candidates
-        if !llm_detect_candidates.is_empty() {
-            let detected: HashSet<String> = match self.provider.lock().await.clone() {
-                Some(provider) => detect_read_only_tools(
-                    provider,
-                    &self.session_manager,
-                    session_id,
-                    llm_detect_candidates.to_vec(),
-                )
-                .await
-                .into_iter()
-                .collect(),
-                None => Default::default(),
-            };
+        if !read_only_candidates.is_empty() {
+            let judge_read_only_tool_names: HashSet<String> =
+                match self.provider.lock().await.clone() {
+                    Some(provider) => detect_read_only_tools(
+                        provider,
+                        &self.session_manager,
+                        session_id,
+                        read_only_candidates.to_vec(),
+                    )
+                    .await
+                    .into_iter()
+                    .collect(),
+                    None => Default::default(),
+                };
 
-            for candidate in &llm_detect_candidates {
-                // The judge's verdict is model output over a model-supplied
-                // tool name and arguments, so a prompt-injected "this is
-                // read-only" must not by itself unlock execution or write
-                // authority. A tool that can run code or touch the filesystem
-                // always falls back to an approval prompt, whatever the judge
-                // concluded. (SEC-GOS-013, LLM-GSL-006)
-                let is_readonly = candidate
+            for candidate in &read_only_candidates {
+                // Model output alone cannot grant a tool with recognized side effects.
+                // The name-based gate still applies to a positive judgment. (SEC-GOS-013, LLM-GSL-006)
+                let can_auto_approve = candidate
                     .tool_call
                     .as_ref()
-                    .map(|tc| {
-                        detected.contains(&tc.name.to_string())
-                            && !tool_class::requires_explicit_grant_in_auto(&tc.name)
+                    .map(|tool_call| {
+                        judge_read_only_tool_names.contains(&tool_call.name.to_string())
+                            && !tool_class::requires_explicit_grant_in_auto(&tool_call.name)
                     })
                     .unwrap_or(false);
 
                 // A negative result can safely tighten future calls. A positive
                 // result is argument-specific and must be recomputed every time.
-                if !is_readonly {
-                    if let Ok(tc) = &candidate.tool_call {
-                        // Best-effort cache tightening: losing it only costs a
-                        // recompute next turn, so this one is genuinely
-                        // ignorable — unlike a user decision. (STT-GOS-005)
-                        let _ = permission_manager
-                            .update_smart_approve_permission(&tc.name, PermissionLevel::AskBefore);
+                if !can_auto_approve {
+                    if let Ok(tool_call) = &candidate.tool_call {
+                        // A failed cache write leaves this call gated and causes
+                        // classification to repeat next time. (STT-GOS-005)
+                        let _ = permission_manager.update_smart_approve_permission(
+                            &tool_call.name,
+                            PermissionLevel::AskBefore,
+                        );
                     }
                 }
 
                 results.push(InspectionResult {
                     tool_request_id: candidate.id.clone(),
-                    action: if is_readonly {
+                    action: if can_auto_approve {
                         InspectionAction::Allow
                     } else {
                         InspectionAction::RequireApproval(None)
                     },
-                    reason: if is_readonly {
+                    reason: if can_auto_approve {
                         "LLM detected as read-only".to_string()
                     } else {
                         "Tool requires user approval".to_string()
                     },
-                    confidence: 1.0, // Permission decisions are definitive
+                    confidence: 1.0,
                     inspector_name: self.name().to_string(),
                     finding_id: None,
                     metadata: None,

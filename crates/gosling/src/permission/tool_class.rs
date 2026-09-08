@@ -1,13 +1,8 @@
-//! Shared tool classification.
+//! Shared name-based classification for permission and security inspectors.
 //!
-//! Four independent predicates previously decided "is this a shell tool"
-//! (INV-GSL-004): two byte-identical copies in the scanner and egress
-//! inspector, a loose `contains()` form in the working-dir scope inspector
-//! that matched `computercontroller__automation_script` only by accident, and
-//! a separate literal list in the adversary inspector. They disagreed, so a
-//! tool could be scanned by one inspector and ignored by another.
-//!
-//! This module is the single owner of that judgement.
+//! Shared predicates keep inspectors from disagreeing about a recognized tool's
+//! authority. They match known names and extension suffixes, not call arguments;
+//! an unrecognized name is not proof of read-only behavior. (INV-GSL-004)
 
 /// Bare tool names that execute an arbitrary command line.
 const SHELL_TOOL_NAMES: &[&str] = &[
@@ -74,8 +69,16 @@ const MIXED_RISK_TOOL_NAMES: &[&str] = &[
     "computercontroller__pdf_tool",
 ];
 
-fn matches_name_or_suffix(name: &str, names: &[&str], suffixes: &[&str]) -> bool {
-    names.contains(&name) || suffixes.iter().any(|suffix| name.ends_with(suffix))
+fn matches_name_or_suffix(
+    tool_name: &str,
+    bare_names: &[&str],
+    extension_suffixes: &[&str],
+) -> bool {
+    // Match an extension's complete tool suffix, not a substring elsewhere in its name.
+    bare_names.contains(&tool_name)
+        || extension_suffixes
+            .iter()
+            .any(|suffix| tool_name.ends_with(suffix))
 }
 
 /// A tool that executes an arbitrary command line.
@@ -93,14 +96,13 @@ pub fn is_write_tool(name: &str) -> bool {
     matches_name_or_suffix(name, WRITE_TOOL_NAMES, WRITE_TOOL_SUFFIXES)
 }
 
+/// Matches recognized network tool names; destination and transfer direction are inspected separately.
 pub fn is_egress_tool(name: &str) -> bool {
     matches_name_or_suffix(name, EGRESS_TOOL_NAMES, EGRESS_TOOL_SUFFIXES)
 }
 
-/// Tools that carry enough authority that an autonomous agent must not run
-/// them on an implicit grant. `Auto` has no operator attached, so these
-/// require an explicit user permission rather than the blanket approval Auto
-/// previously handed out (SEC-GOS-003).
+/// Known side-effecting or mixed-action tools that need an explicit permission in Auto.
+/// Enabling their extension alone must not grant that authority. (SEC-GOS-003)
 pub fn requires_explicit_grant_in_auto(name: &str) -> bool {
     is_code_execution_tool(name)
         || is_write_tool(name)
