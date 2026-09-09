@@ -70,6 +70,7 @@ export interface ArtifactFileListItem {
   detail: string;
   active: boolean;
   status?: string;
+  blocked?: boolean;
   timestampRevision?: string;
 }
 
@@ -158,7 +159,8 @@ export function ArtifactFileList({
   const deleting = useRef(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const selectedItems = items.filter((item) => selected.has(item.path));
-  const allSelected = items.length > 0 && selectedItems.length === items.length;
+  const selectableItems = items.filter((item) => !item.blocked);
+  const allSelected = selectableItems.length > 0 && selectedItems.length === selectableItems.length;
 
   const deletePending = async () => {
     if (deleting.current || pending.length === 0) return;
@@ -211,10 +213,10 @@ export function ArtifactFileList({
             ref={(node) => {
               if (node) node.indeterminate = selectedItems.length > 0 && !allSelected;
             }}
-            disabled={busy || items.length === 0}
+            disabled={busy || selectableItems.length === 0}
             onChange={(event) =>
               setSelected(
-                event.target.checked ? new Set(items.map((item) => item.path)) : new Set()
+                event.target.checked ? new Set(selectableItems.map((item) => item.path)) : new Set()
               )
             }
           />
@@ -261,7 +263,7 @@ export function ArtifactFileList({
               <input
                 type="checkbox"
                 checked={selected.has(item.path)}
-                disabled={busy}
+                disabled={busy || (!selected.has(item.path) && item.blocked)}
                 aria-label={intl.formatMessage(i18n.select, { name: item.name })}
                 onChange={(event) =>
                   setSelected((previous) => {

@@ -724,13 +724,12 @@ export function ArtifactPane() {
   const selectedArtifactPath =
     activeTab?.source.type === 'file' ? activeTab.source.path : undefined;
 
-  const artifactStatus = (displayPath: string) => {
+  const artifactStatus = (displayPath: string): { text: string; blocked: boolean } | null => {
     if (displayPath !== selectedArtifactPath || !preview) return null;
-    if (preview.truncated) return intl.formatMessage(i18n.truncated);
+    if (preview.truncated) return { text: intl.formatMessage(i18n.truncated), blocked: false };
     if (!preview.error) return null;
-    return intl.formatMessage(
-      /not found|no such file|missing/i.test(preview.error) ? i18n.missing : i18n.blocked
-    );
+    const blocked = !/not found|no such file|missing/i.test(preview.error);
+    return { text: intl.formatMessage(blocked ? i18n.blocked : i18n.missing), blocked };
   };
 
   const supportsCopyContents = activeTab && !['image', 'pdf', 'unknown'].includes(activeTab.kind);
@@ -1091,20 +1090,24 @@ export function ArtifactPane() {
                 outputSessionId={visibleSessionId ?? undefined}
                 onRestored={() => setPreviewRevision((revision) => revision + 1)}
                 label={intl.formatMessage(i18n.outputs)}
-                items={displayedArtifacts.map((artifact) => ({
-                  path: artifact.resolvedPath,
-                  timestampRevision: artifact.lastSeenAt,
-                  name: documentTitles[artifact.resolvedPath] || artifact.displayPath,
-                  detail: documentTitles[artifact.resolvedPath]
-                    ? `${artifact.displayPath} · ${artifact.relation}`
-                    : `${artifact.relation} · ${artifact.provenance.replace(/_/g, ' ')}`,
-                  active:
-                    activeTab?.source.type === 'file' &&
-                    (activeTab.source.path === artifact.resolvedPath ||
-                      (activeTab.source.path === artifact.displayPath &&
-                        activeTab.source.baseDirectory === artifact.baseWorkingDir)),
-                  status: artifactStatus(artifact.displayPath) || undefined,
-                }))}
+                items={displayedArtifacts.map((artifact) => {
+                  const status = artifactStatus(artifact.displayPath);
+                  return {
+                    path: artifact.resolvedPath,
+                    timestampRevision: artifact.lastSeenAt,
+                    name: documentTitles[artifact.resolvedPath] || artifact.displayPath,
+                    detail: documentTitles[artifact.resolvedPath]
+                      ? `${artifact.displayPath} · ${artifact.relation}`
+                      : `${artifact.relation} · ${artifact.provenance.replace(/_/g, ' ')}`,
+                    active:
+                      activeTab?.source.type === 'file' &&
+                      (activeTab.source.path === artifact.resolvedPath ||
+                        (activeTab.source.path === artifact.displayPath &&
+                          activeTab.source.baseDirectory === artifact.baseWorkingDir)),
+                    status: status?.text,
+                    blocked: status?.blocked ?? false,
+                  };
+                })}
                 onOpen={(path) => {
                   const artifact = displayedArtifacts.find((item) => item.resolvedPath === path);
                   if (artifact) openArtifact(artifact);
