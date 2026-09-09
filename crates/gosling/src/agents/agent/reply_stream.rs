@@ -211,11 +211,21 @@ impl Agent {
                         )
                     );
 
+                    let auto_compact_budget = crate::context_mgmt::auto_compact_reduction_budget(
+                        active_provider.as_ref(),
+                        &conversation,
+                        &current_session_for_compact,
+                        None,
+                        None,
+                    )
+                    .await?;
+
                     match self.perform_compact_with_provider(
                         active_provider.clone(),
                         &active_model_config,
                         &session_config,
                         &conversation,
+                        auto_compact_budget,
                     ).await {
                         Ok(compacted_conversation) => {
                             conversation = compacted_conversation;
@@ -809,6 +819,10 @@ impl Agent {
                                     &active_model_config,
                                     &session_config,
                                     &conversation,
+                                    // The provider already hit its hard context limit, so this
+                                    // must fully resolve in one pass rather than take a soft,
+                                    // budget-capped trim — same as a manual /compact.
+                                    None,
                                 )
                                 .await
                             {

@@ -323,6 +323,18 @@ impl Agent {
 
         let needs_auto_compact =
             check_if_compaction_needed(provider.as_ref(), &conversation, None, &session).await?;
+        let auto_compact_budget = if needs_auto_compact {
+            crate::context_mgmt::auto_compact_reduction_budget(
+                provider.as_ref(),
+                &conversation,
+                &session,
+                None,
+                None,
+            )
+            .await?
+        } else {
+            None
+        };
 
         let conversation_to_compact = conversation.clone();
 
@@ -362,7 +374,12 @@ impl Agent {
 
                 let compact_model_config = self.model_config_for_session(&session_config.id).await?;
                 match self
-                    .perform_compact(&compact_model_config, &session_config, &conversation_to_compact)
+                    .perform_compact(
+                        &compact_model_config,
+                        &session_config,
+                        &conversation_to_compact,
+                        auto_compact_budget,
+                    )
                     .await
                 {
                     Ok(compacted_conversation) => {
@@ -397,12 +414,14 @@ impl Agent {
         model_config: &gosling_providers::model::ModelConfig,
         session_config: &SessionConfig,
         conversation: &Conversation,
+        tokens_to_remove: Option<usize>,
     ) -> Result<Conversation> {
         self.perform_compact_with_provider(
             self.provider().await?,
             model_config,
             session_config,
             conversation,
+            tokens_to_remove,
         )
         .await
     }
@@ -413,6 +432,7 @@ impl Agent {
         model_config: &gosling_providers::model::ModelConfig,
         session_config: &SessionConfig,
         conversation: &Conversation,
+        tokens_to_remove: Option<usize>,
     ) -> Result<Conversation> {
         let (compacted_conversation, usage) = compact_messages(
             provider.as_ref(),
@@ -420,6 +440,7 @@ impl Agent {
             &session_config.id,
             conversation,
             false,
+            tokens_to_remove,
         )
         .await?;
         let session_manager = self.config.session_manager.clone();

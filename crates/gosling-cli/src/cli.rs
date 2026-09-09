@@ -64,6 +64,20 @@ fn warn_about_invalid_config_values() {
         }
         _ => {}
     }
+
+    match config.get_param::<f64>("GOSLING_AUTO_COMPACT_REDUCTION") {
+        Ok(reduction) if reduction != 0.0 && !(0.0..1.0).contains(&reduction) => {
+            eprintln!(
+                "Warning: Invalid GOSLING_AUTO_COMPACT_REDUCTION: {reduction}. Use 0 to always fully collapse on auto-compaction, or a value greater than 0 and less than 1."
+            );
+        }
+        Err(error) if !matches!(error, ConfigError::NotFound(_)) => {
+            eprintln!(
+                "Warning: Invalid GOSLING_AUTO_COMPACT_REDUCTION: {error}. Falling back to the default."
+            );
+        }
+        _ => {}
+    }
 }
 
 fn generate_serve_secret_key() -> String {

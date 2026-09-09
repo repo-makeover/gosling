@@ -53,6 +53,7 @@ The following settings can be configured at the root level of your config.yaml f
 | `GOSLING_CLI_SHOW_COST` | Show estimated cost for token use in the CLI | true/false | false | No |
 | `GOSLING_ALLOWLIST` | URL for allowed extensions | Valid URL | None | No |
 | `GOSLING_AUTO_COMPACT_THRESHOLD` | Set the percentage threshold at which gosling [automatically summarizes your session](/docs/guides/sessions/smart-context-management#automatic-compaction). | Float between 0.0 and 1.0 (disabled at 0.0)| 0.8 | No |
+| `GOSLING_AUTO_COMPACT_REDUCTION` | How far below `GOSLING_AUTO_COMPACT_THRESHOLD` [auto-compaction targets](/docs/guides/sessions/smart-context-management#automatic-compaction) in a single pass, instead of always fully collapsing the eligible history | Float between 0.0 and 1.0, less than the threshold (0.0 always fully collapses) | 0.15 | No |
 | `SECURITY_PROMPT_ENABLED` | Enable [prompt injection detection](/docs/guides/security/prompt-injection-detection) to identify potentially harmful commands | true/false | true | No |
 | `SECURITY_PROMPT_THRESHOLD` | Sensitivity threshold for prompt injection detection (higher = stricter) | Float between 0.01 and 1.0 | 0.8 | No |
 | `SECURITY_PROMPT_CLASSIFIER_ENABLED` | Enable ML-based prompt injection detection for advanced threat identification | true/false | false | No |

@@ -40,6 +40,13 @@ pub use summarizer::{summarizer_mode, PendingSummary, SummarizerMode, Summarizer
 
 pub const DEFAULT_COMPACTION_THRESHOLD: f64 = 0.8;
 
+/// How far below `GOSLING_AUTO_COMPACT_THRESHOLD` auto-compaction targets when
+/// it fires, expressed as a fraction of the context window. E.g. threshold
+/// 0.8 with the 0.15 default lands auto-compaction at 0.65 usage in a single
+/// pass, regardless of how far past 0.8 usage had climbed before the check
+/// ran — see `auto_compact_reduction_budget`.
+pub const DEFAULT_AUTO_COMPACT_REDUCTION: f64 = 0.15;
+
 const TOOLCALL_SUMMARIZATION_BATCH_SIZE: usize = 10;
 const COMPACTION_MAX_INPUT_BYTES: usize = 192 * 1024;
 const COMPACTION_MIN_INPUT_BYTES: usize = 24 * 1024;
@@ -69,6 +76,12 @@ fn compact_protect_last_n_turns() -> usize {
     Config::global()
         .get_param::<usize>("GOSLING_COMPACT_PROTECT_LAST_N_TURNS")
         .unwrap_or(DEFAULT_COMPACT_PROTECT_LAST_N_TURNS)
+}
+
+fn auto_compact_reduction() -> f64 {
+    Config::global()
+        .get_param::<f64>("GOSLING_AUTO_COMPACT_REDUCTION")
+        .unwrap_or(DEFAULT_AUTO_COMPACT_REDUCTION)
 }
 
 /// A turn starts at an agent-visible user message that isn't itself a tool
@@ -135,6 +148,40 @@ fn compaction_bands(
     bands
 }
 
+/// Finds how far into the eligible region (oldest-first, up to `ceiling`)
+/// auto-compaction needs to reach to remove roughly `tokens_to_remove` raw
+/// tokens, so newer-but-still-eligible turns can be left untouched instead of
+/// folding the whole region into a summary every time. Falls back to
+/// `ceiling` (compact everything eligible, same as a `None` budget) when even
+/// the full region doesn't cover the requested reduction.
+///
+/// Counts each turn's raw pre-summarization size rather than the net size
+/// change (original minus the resulting summary), so this slightly
+/// overshoots the requested reduction rather than undershoot it.
+fn budget_capped_compact_end(
+    messages: &[Message],
+    turn_starts: &[usize],
+    ceiling: usize,
+    tokens_to_remove: usize,
+    token_counter: &crate::token_counter::TokenCounter,
+) -> usize {
+    let eligible: Vec<usize> = turn_starts
+        .iter()
+        .copied()
+        .filter(|&idx| idx < ceiling)
+        .collect();
+
+    let mut removed = 0usize;
+    for (i, &start) in eligible.iter().enumerate() {
+        let end = eligible.get(i + 1).copied().unwrap_or(ceiling);
+        removed += token_counter.count_chat_tokens("", &messages[start..end], &[]);
+        if removed >= tokens_to_remove {
+            return end;
+        }
+    }
+    ceiling
+}
+
 const CONVERSATION_CONTINUATION_TEXT: &str =
     "Your context was compacted. The previous message contains a summary of the conversation so far.
 Do not mention that you read a summary or that conversation summarization occurred.
@@ -173,6 +220,13 @@ struct SummarizeContext {
 /// * `session_id` - The session to use for summarization
 /// * `conversation` - The current conversation history
 /// * `manual_compact` - If true, this is a manual compaction (don't preserve user message)
+/// * `tokens_to_remove` - If `Some`, only the oldest slice of the eligible
+///   (non-protected) region needed to remove roughly this many tokens is
+///   folded into the summary; anything newer stays untouched for a future
+///   pass. `None` collapses the whole eligible region as before — always the
+///   case for `manual_compact`, and used by auto-compaction itself when it
+///   needs a guaranteed full resolution (e.g. recovering from a hard context
+///   overflow) rather than a soft trim. See `auto_compact_reduction_budget`.
 ///
 /// # Returns
 /// * A tuple containing:
@@ -184,6 +238,7 @@ pub async fn compact_messages(
     session_id: &str,
     conversation: &Conversation,
     manual_compact: bool,
+    tokens_to_remove: Option<usize>,
 ) -> Result<(Conversation, ProviderUsage)> {
     info!("Performing message compaction");
 
@@ -261,12 +316,35 @@ pub async fn compact_messages(
         (None, false)
     };
 
-    let messages_to_compact = match protected_start {
+    // `compact_end` is where the actual summary boundary falls this pass; it's
+    // only ever less than `protected_start` when a reduction budget lets us
+    // stop early, leaving newer-but-still-eligible turns untouched instead of
+    // folding the entire eligible region into the summary every time.
+    let compact_end = match protected_start {
+        Some(ceiling) => Some(match tokens_to_remove {
+            Some(budget) if budget > 0 => {
+                let token_counter = crate::token_counter::shared_token_counter()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to create token counter: {}", e))?;
+                budget_capped_compact_end(
+                    messages,
+                    &turn_starts,
+                    ceiling,
+                    budget,
+                    token_counter.as_ref(),
+                )
+            }
+            _ => ceiling,
+        }),
+        None => None,
+    };
+
+    let messages_to_compact = match compact_end {
         Some(split) => &messages[..split],
         None => messages.as_slice(),
     };
 
-    let bands = protected_start
+    let bands = compact_end
         .map(|split| compaction_bands(&turn_starts, split, protect_last_n.max(1)))
         .unwrap_or_default();
 
@@ -357,6 +435,16 @@ pub async fn compact_messages(
     final_messages.extend(merged_continuation);
 
     if let Some(split) = protected_start {
+        // When a reduction budget left `compact_end` short of `protected_start`,
+        // the turns in between were never folded into the summary — splice them
+        // back in verbatim so they stay part of the real conversation (and
+        // become eligible for compaction on a future pass, once they've aged
+        // further behind the protected tail).
+        let untouched_start = compact_end.unwrap_or(split);
+        if untouched_start < split {
+            final_messages.extend(messages[untouched_start..split].iter().cloned());
+        }
+
         // Keep the protected tail exactly as-is: real tool calls, attachments,
         // and all, rather than a reconstructed text-only stand-in.
         final_messages.extend(messages[split..].iter().cloned());
@@ -409,12 +497,29 @@ pub async fn check_if_compaction_needed(
         return Ok(false);
     }
 
-    let messages = conversation.messages();
+    let usage = resolve_context_usage(provider, conversation, session).await?;
+    let usage_ratio = usage.current_tokens as f64 / usage.context_limit as f64;
+    Ok(usage_ratio > threshold)
+}
 
-    // Sessions that never persisted a model config (imports, fresh ACP
-    // sessions) would otherwise be checked against the 128k default limit
-    // regardless of the actual model; resolve the configured model instead so
-    // canonical context limits (e.g. 1M-context models) apply.
+struct ContextUsage {
+    context_limit: usize,
+    current_tokens: usize,
+}
+
+/// Resolves the provider's real context limit (falling back to the
+/// configured model when a session never persisted one — imports, fresh ACP
+/// sessions — so canonical limits like a 1M-context model still apply) and
+/// the conversation's current token usage, taking whichever of the stored
+/// session usage or a fresh tokenization is higher (the stored value is
+/// recorded before tool responses are added, so it can miss large tool
+/// outputs).
+async fn resolve_context_usage(
+    provider: &dyn Provider,
+    conversation: &Conversation,
+    session: &crate::session::Session,
+) -> Result<ContextUsage> {
+    let config = Config::global();
     let model_config = session
         .model_config
         .clone()
@@ -433,17 +538,52 @@ pub async fn check_if_compaction_needed(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create token counter: {}", e))?;
 
-    let estimated_tokens = token_counter.count_chat_tokens("", messages, &[]);
+    let estimated_tokens = token_counter.count_chat_tokens("", conversation.messages(), &[]);
 
-    // The stored value is recorded before tool responses are added, so it can miss
-    // large tool outputs. Use whichever count is higher.
     let current_tokens = match session.usage.total_tokens {
         Some(stored) => (stored as usize).max(estimated_tokens),
         None => estimated_tokens,
     };
 
-    let usage_ratio = current_tokens as f64 / context_limit as f64;
-    Ok(usage_ratio > threshold)
+    Ok(ContextUsage {
+        context_limit,
+        current_tokens,
+    })
+}
+
+/// Computes how many tokens auto-compaction should try to remove so the
+/// conversation lands at `threshold - GOSLING_AUTO_COMPACT_REDUCTION` of the
+/// context window in a single pass — regardless of how far past `threshold`
+/// usage had already climbed when the check ran, rather than needing several
+/// turns to crawl back under it. Returns `None` when the reduction is
+/// disabled or misconfigured (`<= 0` or `>= threshold`), which tells the
+/// caller to fall back to collapsing the whole eligible region as before.
+///
+/// `threshold_override`/`reduction_override` mirror `check_if_compaction_needed`'s
+/// `threshold_override`: production callers pass `None` to read the real
+/// `Config::global()` values, and tests pass explicit values to stay
+/// independent of the operator's actual settings file.
+pub async fn auto_compact_reduction_budget(
+    provider: &dyn Provider,
+    conversation: &Conversation,
+    session: &crate::session::Session,
+    threshold_override: Option<f64>,
+    reduction_override: Option<f64>,
+) -> Result<Option<usize>> {
+    let threshold = threshold_override.unwrap_or_else(|| {
+        Config::global()
+            .get_param::<f64>("GOSLING_AUTO_COMPACT_THRESHOLD")
+            .unwrap_or(DEFAULT_COMPACTION_THRESHOLD)
+    });
+    let reduction = reduction_override.unwrap_or_else(auto_compact_reduction);
+
+    if reduction <= 0.0 || reduction >= threshold {
+        return Ok(None);
+    }
+
+    let usage = resolve_context_usage(provider, conversation, session).await?;
+    let target_tokens = (usage.context_limit as f64 * (threshold - reduction)) as usize;
+    Ok(Some(usage.current_tokens.saturating_sub(target_tokens)))
 }
 
 fn filter_tool_pairs(messages: &[Message], remove_percent: u32) -> Vec<Message> {
@@ -1176,6 +1316,7 @@ mod tests {
             "test-session-id",
             &conversation,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -1210,6 +1351,7 @@ mod tests {
             "test-session-id",
             &conversation,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -1316,6 +1458,56 @@ mod tests {
         assert!(compaction_bands(&turn_starts, 5, 10).is_empty());
     }
 
+    // budget_capped_compact_end only cares about turn_starts positions, so (as in
+    // the compaction_bands tests above) one turn per message index is enough.
+    #[tokio::test]
+    async fn test_budget_capped_compact_end_stops_once_budget_met() {
+        let token_counter = crate::token_counter::shared_token_counter().await.unwrap();
+        let turn_text = "word ".repeat(200);
+        let messages: Vec<Message> = (0..4)
+            .map(|_| Message::user().with_text(turn_text.clone()))
+            .collect();
+        let turn_starts: Vec<usize> = (0..4).collect();
+        let one_turn_tokens = token_counter.count_chat_tokens("", &messages[0..1], &[]);
+
+        // A budget just over one turn's worth needs a second turn to clear it,
+        // so the cutoff should land after turn index 1 (message 2) rather than
+        // consuming the whole eligible region.
+        let end = budget_capped_compact_end(
+            &messages,
+            &turn_starts,
+            4,
+            one_turn_tokens + 1,
+            token_counter.as_ref(),
+        );
+        assert_eq!(
+            end, 2,
+            "should stop as soon as cumulative removal meets the budget, leaving newer turns untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_budget_capped_compact_end_falls_back_to_ceiling_when_budget_exceeds_region() {
+        let token_counter = crate::token_counter::shared_token_counter().await.unwrap();
+        let messages = vec![
+            Message::user().with_text("hi"),
+            Message::assistant().with_text("there"),
+        ];
+        let turn_starts = vec![0usize, 1];
+
+        let end = budget_capped_compact_end(
+            &messages,
+            &turn_starts,
+            2,
+            1_000_000,
+            token_counter.as_ref(),
+        );
+        assert_eq!(
+            end, 2,
+            "an unreachable budget should fall back to compacting the whole eligible region, same as a None budget"
+        );
+    }
+
     #[tokio::test]
     async fn test_compact_retries_transient_network_error() {
         // Regression test: a mid-stream network/decode failure during compaction
@@ -1333,6 +1525,7 @@ mod tests {
             "test-session-id",
             &conversation,
             false,
+            None,
         )
         .await;
 
@@ -1357,6 +1550,7 @@ mod tests {
             "test-session-id",
             &conversation,
             false,
+            None,
         )
         .await;
 
@@ -1396,6 +1590,7 @@ mod tests {
             "test-session-id",
             &conversation,
             true,
+            None,
         )
         .await;
 
@@ -1598,6 +1793,7 @@ mod tests {
             "test-session-id",
             &conversation,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -1687,5 +1883,59 @@ mod tests {
                 "Compaction should be disabled for threshold {disabled_threshold}"
             );
         }
+    }
+
+    // reduction >= threshold (or <= 0) would put the target at or above the
+    // trigger point itself, so it must disable the soft path and signal
+    // callers to fall back to a full collapse instead of silently no-op'ing.
+    #[tokio::test]
+    async fn test_auto_compact_reduction_budget_disabled_when_misconfigured() {
+        let provider = MockProvider::new(Message::assistant().with_text("x"), 1_000);
+        let session = crate::session::Session::default();
+        let conversation = Conversation::new_unvalidated(vec![Message::user().with_text("hi")]);
+
+        for reduction in [0.0, -0.1, 0.6, 0.8] {
+            let result = auto_compact_reduction_budget(
+                &provider,
+                &conversation,
+                &session,
+                Some(0.6),
+                Some(reduction),
+            )
+            .await
+            .unwrap();
+            assert!(
+                result.is_none(),
+                "reduction {reduction} against threshold 0.6 should disable the soft path"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_auto_compact_reduction_budget_targets_threshold_minus_reduction() {
+        // context_limit=1000, threshold=0.8, reduction=0.15 -> target = 650 tokens.
+        let provider = MockProvider::new(Message::assistant().with_text("x"), 1_000);
+        let session = crate::session::Session {
+            usage: Usage::new(Some(900), Some(0), Some(900)),
+            ..crate::session::Session::default()
+        };
+        let conversation = Conversation::new_unvalidated(vec![Message::user().with_text("hi")]);
+
+        let budget = auto_compact_reduction_budget(
+            &provider,
+            &conversation,
+            &session,
+            Some(0.8),
+            Some(0.15),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            budget,
+            Some(250),
+            "should ask to remove current (900) minus the threshold-relative target (650), \
+             regardless of how the 900 was reached"
+        );
     }
 }

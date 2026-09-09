@@ -194,6 +194,7 @@ impl Agent {
             session_id,
             &conversation,
             true, // is_manual_compact
+            None,
         )
         .await
         {

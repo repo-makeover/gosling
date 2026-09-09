@@ -41,6 +41,15 @@ When you reach the auto-compaction threshold:
   2. Once complete, you'll see a confirmation message that the conversation was compacted and summarized.
   3. Continue the session. Your previous conversation remains visible, but only the compacted conversion is included in the active context for gosling.
 
+Auto-compaction targets a level below the threshold rather than fully collapsing the conversation every time — controlled by `GOSLING_AUTO_COMPACT_REDUCTION` (default `0.15`, i.e. 15 percentage points). With the defaults above, crossing 60% usage compacts just enough of the oldest eligible history to bring usage back down to 45%, leaving newer turns untouched until a future pass needs them. This holds regardless of how far past the threshold usage had climbed before the check ran — a conversation that jumps from 40% to 90% in one turn still lands at 45% in a single pass, rather than needing several turns to crawl back down. Set it to `0.0` to always fully collapse the eligible history on every auto-compaction, matching the previous behavior:
+
+```
+# Always fully collapse on auto-compaction instead of a partial, threshold-relative trim
+export GOSLING_AUTO_COMPACT_REDUCTION=0.0
+```
+
+A manual `/compact` (below) always fully collapses the conversation regardless of this setting.
+
 To keep the exchange you're actively working in fully intact, gosling never summarizes the most recent turns — by default the last 10 real turns (a turn is one user message plus gosling's response) are kept verbatim, and everything older is folded into the summary. Adjust this with `GOSLING_COMPACT_PROTECT_LAST_N_TURNS`:
 
 ```

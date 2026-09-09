@@ -23,6 +23,10 @@ fn invalid_runtime_config_values_emit_actionable_warnings() {
             "GOSLING_AUTO_COMPACT_THRESHOLD: 5\n",
             "Invalid GOSLING_AUTO_COMPACT_THRESHOLD",
         ),
+        (
+            "GOSLING_AUTO_COMPACT_REDUCTION: 5\n",
+            "Invalid GOSLING_AUTO_COMPACT_REDUCTION",
+        ),
     ];
 
     for (config, expected_warning) in cases {
@@ -42,7 +46,7 @@ fn valid_runtime_config_values_do_not_warn() {
     let root = TempDir::new().unwrap();
     let output = gosling(
         &root,
-        "GOSLING_MODE: auto\nGOSLING_MAX_TURNS: 5\nGOSLING_AUTO_COMPACT_THRESHOLD: 0.8\n",
+        "GOSLING_MODE: auto\nGOSLING_MAX_TURNS: 5\nGOSLING_AUTO_COMPACT_THRESHOLD: 0.8\nGOSLING_AUTO_COMPACT_REDUCTION: 0.15\n",
     );
 
     assert!(output.status.success());
