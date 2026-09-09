@@ -6,10 +6,37 @@ import type { App, IpcMain } from 'electron';
 import { dialog } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { getGitRepoRoot, isPathGitIgnored } from './gitIpc';
 import type { RendererDirectoryGrantRegistry } from '../utils/rendererDirectoryGrants';
 import { defaultResearchLibraryPath, listResearchLibraryFiles } from '../utils/researchLibrary';
 import type { Settings, SettingKey } from '../utils/settings';
 import { isSettingKey, isSettingValue, setSettingValue } from '../utils/settings';
+
+// A research library folder is gosling's own scratch space, not something the
+// user's repo should track by default — mirrors ensure_gitignored_if_in_repo
+// in crates/gosling/src/workspace/service.rs for workspace output folders.
+export async function ensureGitignoredIfInRepo(directoryPath: string): Promise<void> {
+  const repoRoot = await getGitRepoRoot(directoryPath);
+  if (!repoRoot) return;
+  if (await isPathGitIgnored(repoRoot, directoryPath)) return;
+
+  const parent = path.dirname(directoryPath);
+  const entry = `/${path.basename(directoryPath)}/`;
+  const gitignorePath = path.join(parent, '.gitignore');
+  let contents = '';
+  try {
+    contents = await fs.readFile(gitignorePath, 'utf8');
+  } catch {
+    contents = '';
+  }
+  if (contents.split('\n').some((line) => line.trim() === entry)) return;
+  if (contents && !contents.endsWith('\n')) contents += '\n';
+  try {
+    await fs.writeFile(gitignorePath, `${contents}${entry}\n`, 'utf8');
+  } catch (error) {
+    console.warn('Failed to add research library folder to .gitignore:', error);
+  }
+}
 
 export interface SettingsIpcDependencies {
   app: App;
@@ -68,6 +95,7 @@ export function registerSettingsIpcHandlers(
   async function ensureResearchLibrary(rendererId: number): Promise<string> {
     const libraryPath = configuredResearchLibraryPath();
     await fs.mkdir(libraryPath, { recursive: true });
+    await ensureGitignoredIfInRepo(libraryPath);
     rendererDirectoryGrants.grantSelectedPath(rendererId, libraryPath);
     return libraryPath;
   }
@@ -123,6 +151,7 @@ export function registerSettingsIpcHandlers(
     const resolvedPath = path.resolve(selectedPath);
     updateSettings((settings) => setSettingValue(settings, 'researchLibraryPath', resolvedPath));
     await fs.mkdir(resolvedPath, { recursive: true });
+    await ensureGitignoredIfInRepo(resolvedPath);
     rendererDirectoryGrants.grantSelectedPath(event.sender.id, resolvedPath);
     return resolvedPath;
   });

@@ -5,12 +5,14 @@ import {
   Copy,
   Edit2,
   FileJson,
+  Forward,
   LoaderCircle,
   ShieldAlert,
 } from 'lucide-react';
 import { toast } from 'react-toastify';
 import { AppEvents } from '../constants/events';
 import { defineMessages, useIntl } from '../i18n';
+import { acpChatSessionController } from '../acp/chatSessionController';
 import { acpExportSession, acpForkSession, acpRenameSession } from '../acp/sessions';
 import { getSessionDisplayName } from '../sessions';
 import type { Session } from '../types/session';
@@ -79,6 +81,19 @@ const i18n = defineMessages({
   duplicateFailed: {
     id: 'sessionActionsHeader.duplicateFailed',
     defaultMessage: 'Failed to duplicate session: {error}',
+  },
+  handoffSession: {
+    id: 'sessionActionsHeader.handoffSession',
+    defaultMessage: 'Hand off to new session',
+  },
+  handoffFailed: {
+    id: 'sessionActionsHeader.handoffFailed',
+    defaultMessage: 'Failed to hand off session: {error}',
+  },
+  handoffNoSummary: {
+    id: 'sessionActionsHeader.handoffNoSummary',
+    defaultMessage:
+      "Started a new session with the same settings. This session's context is managed by its own CLI tool, so Gosling couldn't generate a handoff summary from it.",
   },
   jsonTitle: {
     id: 'sessionActionsHeader.jsonTitle',
@@ -337,6 +352,7 @@ export default function SessionActionsHeader({
   const [jsonText, setJsonText] = useState('');
   const [isJsonLoading, setIsJsonLoading] = useState(false);
   const [isDuplicating, setIsDuplicating] = useState(false);
+  const [isHandingOff, setIsHandingOff] = useState(false);
   const [fullTextSelection, setFullTextSelection] = useState<FullTextSelection | null>(null);
   const { activeWorkspace } = useWorkspace();
 
@@ -402,6 +418,26 @@ export default function SessionActionsHeader({
       setIsDuplicating(false);
     }
   }, [intl, isDuplicating, session]);
+
+  const handleHandoff = useCallback(async () => {
+    if (!session || isHandingOff) return;
+
+    setIsHandingOff(true);
+    try {
+      const { hadSummary } = await acpChatSessionController.handoffSession(session.id);
+      if (!hadSummary) {
+        toast.info(intl.formatMessage(i18n.handoffNoSummary));
+      }
+    } catch (error) {
+      toast.error(
+        intl.formatMessage(i18n.handoffFailed, {
+          error: errorMessage(error, 'Unknown error'),
+        })
+      );
+    } finally {
+      setIsHandingOff(false);
+    }
+  }, [intl, isHandingOff, session]);
 
   const handleViewJson = useCallback(async () => {
     if (!session) return;
@@ -528,6 +564,14 @@ export default function SessionActionsHeader({
                 <Copy className="size-4" />
               )}
               {intl.formatMessage(i18n.duplicateSession)}
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={isHandingOff} onSelect={() => void handleHandoff()}>
+              {isHandingOff ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <Forward className="size-4" />
+              )}
+              {intl.formatMessage(i18n.handoffSession)}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void handleViewJson()}>
               {isJsonLoading ? (

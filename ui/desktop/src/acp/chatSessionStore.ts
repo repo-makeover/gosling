@@ -35,6 +35,8 @@ export interface AcpChatSessionSnapshot {
   activePromptAttemptId: string | null;
   activeRunId: string | null;
   pendingCancelPromptAttemptId: string | null;
+  /** Ids of local steer echoes not yet applied by the agent — see `addPendingLocalSteerMessage`. */
+  pendingLocalSteerMessageIds: ReadonlySet<string>;
 }
 
 export interface AcpPromptError {
@@ -879,6 +881,7 @@ function snapshotFromEntry(entry: StoreEntry): AcpChatSessionSnapshot {
     activePromptAttemptId: entry.activePromptAttemptId,
     activeRunId: entry.activeRunId,
     pendingCancelPromptAttemptId: entry.pendingCancelPromptAttemptId,
+    pendingLocalSteerMessageIds: new Set(entry.pendingLocalSteerMessageIds),
   };
 }
 

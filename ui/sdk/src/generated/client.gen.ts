@@ -87,6 +87,8 @@ import type {
   GoslingSessionNotification_unstable,
   GoslingToolCallRequest_unstable,
   GoslingToolCallResponse_unstable,
+  HandoffSessionRequest_unstable,
+  HandoffSessionResponse_unstable,
   ImportSessionRequest_unstable,
   ImportSessionResponse_unstable,
   ImportSourcesRequest_unstable,
@@ -244,6 +246,7 @@ import {
   zGetToolsResponse_unstable,
   zGoslingSessionNotification_unstable,
   zGoslingToolCallResponse_unstable,
+  zHandoffSessionResponse_unstable,
   zImportSessionResponse_unstable,
   zImportSourcesResponse_unstable,
   zListAgentMentionsResponse_unstable,
@@ -1262,6 +1265,18 @@ export class GoslingExtClient {
     params: RenameSessionRequest_unstable,
   ): Promise<void> {
     await this.conn.extMethod("_gosling/unstable/session/rename", params);
+  }
+
+  async sessionHandoff_unstable(
+    params: HandoffSessionRequest_unstable,
+  ): Promise<HandoffSessionResponse_unstable> {
+    const raw = await this.conn.extMethod(
+      "_gosling/unstable/session/handoff",
+      params,
+    );
+    return zHandoffSessionResponse_unstable.parse(
+      raw,
+    ) as HandoffSessionResponse_unstable;
   }
 
   async sessionArchive_unstable(

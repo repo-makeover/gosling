@@ -31,6 +31,7 @@ import { clearSelectedSessionInputs, getSelectedSessionInputs } from './sessionI
 import { viewableFilePathsFromMarkdown } from '../components/artifacts/artifactUtils';
 import {
   acpForkSession,
+  acpHandoffSession,
   acpLoadSession,
   acpListSessionArtifacts,
   acpNewSession,
@@ -74,6 +75,7 @@ export interface AcpChatSessionController {
     editType: 'fork' | 'edit' | undefined,
     options: AcpSubmitMessageOptions
   ): Promise<void>;
+  handoffSession(sessionId: string): Promise<{ hadSummary: boolean }>;
 }
 
 function createAcpCreditsExhaustedMessage(error: AcpCreditsExhaustedError): Message {
@@ -125,6 +127,20 @@ async function forkSessionWithEditedMessage(
     },
   });
   window.dispatchEvent(event);
+}
+
+async function handoffSession(sessionId: string): Promise<{ hadSummary: boolean }> {
+  const { sessionId: newSessionId, handoffSummary } = await acpHandoffSession(sessionId);
+
+  const event = new CustomEvent(AppEvents.SESSION_HANDED_OFF, {
+    detail: {
+      newSessionId,
+      shouldStartAgent: Boolean(handoffSummary),
+      initialMessage: handoffSummary,
+    },
+  });
+  window.dispatchEvent(event);
+  return { hadSummary: Boolean(handoffSummary) };
 }
 
 async function createSession(
@@ -508,4 +524,5 @@ export const acpChatSessionController: AcpChatSessionController = {
   submitMessage,
   stop,
   updateMessage,
+  handoffSession,
 };

@@ -85,6 +85,8 @@ interface ProgressiveMessageListProps {
   threadTurnAttribute?: string;
   forceRenderAll?: boolean;
   onThreadTurnsRendered?: () => void;
+  /** Ids of local steer echoes the agent hasn't applied yet — see `AcpChatSessionSnapshot.pendingSteerMessageIds`. */
+  pendingSteerMessageIds?: ReadonlySet<string>;
 }
 
 interface MessageRenderIndex {
@@ -138,6 +140,7 @@ export default function ProgressiveMessageList({
   threadTurnAttribute,
   forceRenderAll = false,
   onThreadTurnsRendered,
+  pendingSteerMessageIds,
 }: ProgressiveMessageListProps) {
   const intl = useIntl();
   const [renderedCount, setRenderedCount] = useState(() => {
@@ -299,6 +302,19 @@ export default function ProgressiveMessageList({
     return -1;
   }, [messages, isUserMessage]);
 
+  // A steer appends its local echo (a user message) to the end of the array
+  // while the assistant message it interrupted is still receiving updates in
+  // its own slot — so "last array index" no longer identifies the message
+  // that is actually streaming. Track the last assistant message instead.
+  const lastAssistantMessageIndex = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index].role === 'assistant') {
+        return index;
+      }
+    }
+    return -1;
+  }, [messages]);
+
   const messageRenderIndex = useMemo<MessageRenderIndex>(() => {
     const toolResponseByRequestId = new Map<string, ToolResponseMessageContent>();
     const confirmationByToolRequestId = new Map<string, ToolConfirmationData>();
@@ -436,6 +452,7 @@ export default function ProgressiveMessageList({
                 <UserMessage
                   message={message}
                   canRetry={!isStreamingMessage && index === lastUserPromptIndex}
+                  isQueuedSteer={Boolean(message.id && pendingSteerMessageIds?.has(message.id))}
                   onMessageUpdate={onMessageUpdate}
                 />
               )
@@ -453,7 +470,7 @@ export default function ProgressiveMessageList({
                 isStreaming={
                   isStreamingMessage &&
                   !isUser &&
-                  index === messagesToRender.length - 1 &&
+                  index === lastAssistantMessageIndex &&
                   message.role === 'assistant'
                 }
                 submitElicitationResponse={submitElicitationResponse}
@@ -500,16 +517,23 @@ export default function ProgressiveMessageList({
           const lastActivityIndex = activityGroup[activityGroup.length - 1];
           const isStreamingActivity =
             isStreamingMessage &&
-            messages.slice(lastActivityIndex + 1).every((candidate) => {
-              const { imagePaths, textContent } = getTextAndImageContent(candidate);
-              return (
-                candidate.metadata.userVisible &&
-                getToolResponses(candidate).length > 0 &&
-                getToolRequests(candidate).length === 0 &&
-                !textContent.trim() &&
-                imagePaths.length === 0
-              );
-            });
+            // A steer's local echo (a user message) can land right after this
+            // group while the tools it's waiting on are still running — that
+            // doesn't mean the assistant has moved past this activity, so it's
+            // excluded rather than treated as evidence the group has closed.
+            messages
+              .slice(lastActivityIndex + 1)
+              .filter((candidate) => !isUserMessage(candidate))
+              .every((candidate) => {
+                const { imagePaths, textContent } = getTextAndImageContent(candidate);
+                return (
+                  candidate.metadata.userVisible &&
+                  getToolResponses(candidate).length > 0 &&
+                  getToolRequests(candidate).length === 0 &&
+                  !textContent.trim() &&
+                  imagePaths.length === 0
+                );
+              });
           const activityRequests = activityGroup.flatMap((messageIndex) =>
             getToolRequests(messages[messageIndex])
           );
@@ -574,6 +598,8 @@ export default function ProgressiveMessageList({
     isStreamingMessage,
     onMessageUpdate,
     lastUserPromptIndex,
+    lastAssistantMessageIndex,
+    pendingSteerMessageIds,
     messageRenderIndex,
     submitElicitationResponse,
     workingDirectory,

@@ -416,6 +416,37 @@ export default function BaseChat({
     };
   }, [location.pathname, navigate]);
 
+  useEffect(() => {
+    const handleSessionHandedOff = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        newSessionId: string;
+        shouldStartAgent?: boolean;
+        initialMessage?: string;
+      }>;
+      window.dispatchEvent(new CustomEvent(AppEvents.SESSION_CREATED));
+      const { newSessionId, shouldStartAgent, initialMessage } = customEvent.detail;
+
+      const params = new URLSearchParams();
+      params.set('resumeSessionId', newSessionId);
+      if (shouldStartAgent) {
+        params.set('shouldStartAgent', 'true');
+      }
+
+      navigate(`/pair?${params.toString()}`, {
+        state: {
+          disableAnimation: true,
+          initialMessage: initialMessage ? { msg: initialMessage, images: [] } : undefined,
+        },
+      });
+    };
+
+    window.addEventListener(AppEvents.SESSION_HANDED_OFF, handleSessionHandedOff);
+
+    return () => {
+      window.removeEventListener(AppEvents.SESSION_HANDED_OFF, handleSessionHandedOff);
+    };
+  }, [location.pathname, navigate]);
+
   const lastSetNameRef = useRef<string>('');
 
   useEffect(() => {
@@ -622,6 +653,7 @@ export default function BaseChat({
                     threadTurnAttribute={THREAD_TURN_ATTRIBUTE}
                     forceRenderAll={threadNavigationRenderSessionId === sessionId}
                     onThreadTurnsRendered={handleThreadTurnsRendered}
+                    pendingSteerMessageIds={acpSessionSnapshot?.pendingLocalSteerMessageIds}
                   />
                 </SearchView>
 

@@ -1030,6 +1030,29 @@ pub struct RenameSessionRequest {
     pub title: String,
 }
 
+/// Hand a session off to a brand-new one: generates a human-readable
+/// continuation briefing from the source session's conversation, then creates
+/// a fresh session carrying over the same working directory, workspace,
+/// provider/model, and extension configuration (but none of the source
+/// conversation itself).
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
+#[request(method = "_gosling/unstable/session/handoff", response = HandoffSessionResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffSessionRequest {
+    pub session_id: String,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcResponse)]
+#[serde(rename_all = "camelCase")]
+pub struct HandoffSessionResponse {
+    pub session_id: String,
+    /// Absent when the source session's provider manages its own context (its
+    /// history isn't visible to Gosling to summarize) — the new session still
+    /// carries over the same settings, just without a generated briefing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handoff_summary: Option<String>,
+}
+
 /// Archive a session (soft delete).
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema, JsonRpcRequest)]
 #[request(method = "_gosling/unstable/session/archive", response = EmptyResponse)]

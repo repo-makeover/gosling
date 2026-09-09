@@ -723,6 +723,14 @@ impl GoslingAcpAgent {
         self.on_rename_session(req).await
     }
 
+    #[custom_method(HandoffSessionRequest)]
+    async fn dispatch_handoff_session(
+        &self,
+        req: HandoffSessionRequest,
+    ) -> Result<HandoffSessionResponse, agent_client_protocol::Error> {
+        self.on_handoff_session(req).await
+    }
+
     #[custom_method(ArchiveSessionRequest)]
     async fn dispatch_archive_session(
         &self,

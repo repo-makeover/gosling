@@ -52,6 +52,7 @@ const COMPACTION_MAX_INPUT_BYTES: usize = 192 * 1024;
 const COMPACTION_MIN_INPUT_BYTES: usize = 24 * 1024;
 const COMPACTION_MAX_INPUT_TOKENS: usize = 60_000;
 const COMPACTION_SUMMARY_TARGET_CHARACTERS: usize = 12_000;
+const HANDOFF_SUMMARY_TARGET_CHARACTERS: usize = 6_000;
 const COMPACTION_MAX_REDUCTION_ROUNDS: usize = 12;
 const COMPACT_BAND_BASE_CHARACTERS: usize = 4_000;
 const COMPACT_BAND_STEP_CHARACTERS: usize = 600;
@@ -474,6 +475,31 @@ pub async fn compact_messages(
     ))
 }
 
+/// Generates a human-readable continuation briefing for handing a
+/// conversation off to a brand-new session, distinct from `compact_messages`:
+/// where compaction folds a summary invisibly back into *this* session to
+/// keep it going, a handoff summary is meant to be read by the user (and then
+/// sent as the new session's first message), so it's shorter and doesn't use
+/// compaction's "only ever read by you" framing.
+pub async fn generate_handoff_summary(
+    provider: &dyn Provider,
+    model_config: &ModelConfig,
+    session_id: &str,
+    conversation: &Conversation,
+) -> Result<(String, ProviderUsage)> {
+    let messages = conversation.messages();
+    let (summary_message, usage) = do_summarize(
+        provider,
+        model_config,
+        session_id,
+        messages,
+        HANDOFF_SUMMARY_TARGET_CHARACTERS,
+        "handoff.md",
+    )
+    .await?;
+    Ok((summary_message.as_concat_text(), usage))
+}
+
 /// Shared legal range for persisted preferences and runtime configuration.
 pub fn validate_compaction_settings(threshold: f64, reduction: f64) -> Result<()> {
     anyhow::ensure!(
@@ -887,6 +913,30 @@ async fn do_compact(
     messages: &[Message],
     target_characters: usize,
 ) -> Result<(Message, ProviderUsage), anyhow::Error> {
+    do_summarize(
+        provider,
+        model_config,
+        session_id,
+        messages,
+        target_characters,
+        "compaction.md",
+    )
+    .await
+}
+
+/// Shared reduction machinery behind both in-session compaction and a
+/// standalone summary (e.g. for handing a conversation off to a new
+/// session): renders `template` over bounded chunks of `messages`, retrying
+/// with a smaller input budget and more aggressive tool-pair filtering until
+/// a summary converges within the provider's context limit.
+async fn do_summarize(
+    provider: &dyn Provider,
+    model_config: &ModelConfig,
+    session_id: &str,
+    messages: &[Message],
+    target_characters: usize,
+    template: &str,
+) -> Result<(Message, ProviderUsage), anyhow::Error> {
     let agent_visible_messages: Vec<Message> = messages
         .iter()
         .filter(|msg| msg.is_agent_visible())
@@ -897,7 +947,7 @@ async fn do_compact(
         messages: "Conversation history is supplied in bounded user-message chunks.".to_string(),
         summary_target_characters: target_characters,
     };
-    let system_prompt = render_template("compaction.md", &context)?;
+    let system_prompt = render_template(template, &context)?;
     let token_counter = crate::token_counter::shared_token_counter()
         .await
         .map_err(|error| anyhow::anyhow!("Failed to create token counter: {error}"))?;
@@ -1567,6 +1617,24 @@ mod tests {
             "Compaction should recover from transient network errors via retry: {:?}",
             result.err()
         );
+    }
+
+    #[tokio::test]
+    async fn test_generate_handoff_summary_returns_the_rendered_text() {
+        let response_message = Message::assistant().with_text("Goal: finish the thing.");
+        let provider = MockProvider::new(response_message, 1000);
+        let conversation = Conversation::new_unvalidated(vec![
+            Message::user().with_text("let's do the thing"),
+            Message::assistant().with_text("working on it"),
+        ]);
+        let model_config = provider.config.clone();
+
+        let (summary, _usage) =
+            generate_handoff_summary(&provider, &model_config, "test-session-id", &conversation)
+                .await
+                .unwrap();
+
+        assert_eq!(summary, "Goal: finish the thing.");
     }
 
     #[tokio::test]

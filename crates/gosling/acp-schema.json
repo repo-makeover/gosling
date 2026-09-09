@@ -5748,6 +5748,40 @@
       "x-side": "agent",
       "x-method": "_gosling/unstable/session/rename"
     },
+    "HandoffSessionRequest_unstable": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "description": "Hand a session off to a brand-new one: generates a human-readable\ncontinuation briefing from the source session's conversation, then creates\na fresh session carrying over the same working directory, workspace,\nprovider/model, and extension configuration (but none of the source\nconversation itself).",
+      "x-side": "agent",
+      "x-method": "_gosling/unstable/session/handoff"
+    },
+    "HandoffSessionResponse_unstable": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "handoffSummary": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Absent when the source session's provider manages its own context (its\nhistory isn't visible to Gosling to summarize) — the new session still\ncarries over the same settings, just without a generated briefing."
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "x-side": "agent",
+      "x-method": "_gosling/unstable/session/handoff"
+    },
     "ArchiveSessionRequest_unstable": {
       "type": "object",
       "properties": {
@@ -8391,6 +8425,15 @@
                 {
                   "allOf": [
                     {
+                      "$ref": "#/$defs/HandoffSessionRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _gosling/unstable/session/handoff",
+                  "title": "HandoffSessionRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
                       "$ref": "#/$defs/ArchiveSessionRequest_unstable"
                     }
                   ],
@@ -9192,6 +9235,14 @@
                         }
                       ],
                       "title": "GetSessionSummaryResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/HandoffSessionResponse_unstable"
+                        }
+                      ],
+                      "title": "HandoffSessionResponse_unstable"
                     },
                     {
                       "allOf": [

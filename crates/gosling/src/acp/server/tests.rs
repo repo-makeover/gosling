@@ -59,7 +59,10 @@ async fn acp_active_run_pins_the_agent_manager_lru_entry() {
     assert!(manager.has_session("active").await);
     assert!(!manager.has_session("idle").await);
     assert!(manager.is_session_busy("active").await);
-    assert!(unregister_active_prompt_run(&active_prompt_runs, &manager, "active", "run-1").await);
+    assert_eq!(
+        unregister_active_prompt_run(&active_prompt_runs, &manager, "active", "run-1").await,
+        Some(false)
+    );
     assert!(!manager.is_session_busy("active").await);
 }
 

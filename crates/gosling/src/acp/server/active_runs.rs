@@ -42,24 +42,26 @@ pub(super) async fn register_active_prompt_run(
     Ok(())
 }
 
+/// Returns `Some(was_cancelled)` if `run_id` matched the session's active run
+/// (and has now been cleared), or `None` if there was nothing to clear.
 pub(super) async fn unregister_active_prompt_run(
     active_prompt_runs: &Mutex<HashMap<String, ActivePromptRun>>,
     agent_manager: &AgentManager,
     session_id: &str,
     run_id: &str,
-) -> bool {
-    {
+) -> Option<bool> {
+    let was_cancelled = {
         let mut active_prompt_runs = active_prompt_runs.lock().await;
-        let Some(active_run) = active_prompt_runs.get(session_id) else {
-            return false;
-        };
+        let active_run = active_prompt_runs.get(session_id)?;
         if active_run.run_id != run_id {
-            return false;
+            return None;
         }
+        let was_cancelled = active_run.cancel_token.is_cancelled();
         active_prompt_runs.remove(session_id);
-    }
+        was_cancelled
+    };
     agent_manager.unregister_cancel_token(session_id).await;
-    true
+    Some(was_cancelled)
 }
 
 impl GoslingAcpAgent {
@@ -87,25 +89,33 @@ impl GoslingAcpAgent {
     }
 
     pub(super) async fn clear_active_run(&self, session_id: &str, run_id: &str) {
-        if !unregister_active_prompt_run(
+        let Some(was_cancelled) = unregister_active_prompt_run(
             &self.active_prompt_runs,
             &self.agent_manager,
             session_id,
             run_id,
         )
         .await
-        {
+        else {
             return;
-        }
-
-        let agent = {
-            let sessions = self.sessions.lock().await;
-            sessions
-                .get(session_id)
-                .map(|session| session.agent.clone())
         };
-        if let Some(agent) = agent {
-            agent.discard_pending_steers(session_id).await;
+
+        // A steer queued for this run only belongs to a *future* run when the
+        // run it targeted was explicitly cancelled — an uncancelled run drains
+        // its own pending steers before it lets itself finish (see
+        // `reply_stream.rs`'s `has_pending_steers` checks), so anything left
+        // here on a normal completion is, at worst, a narrow race that should
+        // still reach the user on the next turn rather than vanish silently.
+        if was_cancelled {
+            let agent = {
+                let sessions = self.sessions.lock().await;
+                sessions
+                    .get(session_id)
+                    .map(|session| session.agent.clone())
+            };
+            if let Some(agent) = agent {
+                agent.discard_pending_steers(session_id).await;
+            }
         }
 
         if self.closed_session_ids.lock().await.contains(session_id) {

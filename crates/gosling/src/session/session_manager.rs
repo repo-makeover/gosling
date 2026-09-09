@@ -490,7 +490,11 @@ impl<'a> SessionUpdateBuilder<'a> {
                 .roots
                 .iter()
                 .map(|root| PathBuf::from(&root.path))
-                .filter(|path| path != &primary)
+                // A root nested inside the primary folder (e.g. a product-output
+                // folder under the working directory) is not a distinct additional
+                // directory — treating it as one double-loads that ancestor's own
+                // project hints (AGENTS.md etc.) under a second label (GCTX-001).
+                .filter(|path| !path.starts_with(&primary))
                 .collect(),
         );
         // The restriction flag is left to the stored column default (off / opt-in):
@@ -1312,7 +1316,10 @@ impl sqlx::FromRow<'_, sqlx::sqlite::SqliteRow> for Session {
                 .roots
                 .iter()
                 .map(|root| PathBuf::from(&root.path))
-                .filter(|path| path != &primary)
+                // See the matching filter in `workspace_snapshot` above: a root
+                // nested under the primary folder isn't a distinct additional
+                // directory (GCTX-001).
+                .filter(|path| !path.starts_with(&primary))
                 .collect();
             // `restrict_tools_to_working_dirs` comes from the stored column, which
             // defaults off (opt-in). Respecting it here (rather than forcing a value)
@@ -4189,6 +4196,77 @@ mod tests {
 
         let database = std::fs::read(temp_dir.path().join(SESSIONS_FOLDER).join(DB_NAME)).unwrap();
         assert!(!String::from_utf8_lossy(&database).contains("GOSLING_SENTINEL_SECRET"));
+    }
+
+    #[tokio::test]
+    async fn additional_working_dirs_excludes_a_product_output_folder_nested_under_primary() {
+        let temp_dir = TempDir::new().unwrap();
+        let sm = SessionManager::new(temp_dir.path().to_path_buf());
+        let session = sm
+            .create_session(
+                temp_dir.path().to_path_buf(),
+                "workspace session".into(),
+                SessionType::User,
+                GoslingMode::default(),
+            )
+            .await
+            .unwrap();
+        let primary_working_folder = temp_dir.path().to_string_lossy().to_string();
+        let nested_output_path = temp_dir
+            .path()
+            .join("Outputs")
+            .to_string_lossy()
+            .to_string();
+        // A product-output folder nested inside the primary working folder is the
+        // normal, intended configuration (e.g. a workspace's default "Outputs"
+        // folder) — it must not be treated as a distinct additional working
+        // directory, or gosling's own project-hint loader double-loads the
+        // primary folder's AGENTS.md while walking up from it (GCTX-001).
+        let context = WorkspaceSessionContext {
+            workspace_id: "workspace-id".into(),
+            workspace_name: "Project".into(),
+            primary_working_folder: primary_working_folder.clone(),
+            folders: Vec::new(),
+            product_output_folders: vec![crate::workspace::ProductOutputFolder {
+                id: "outputs".into(),
+                label: "Outputs".into(),
+                path: nested_output_path.clone(),
+                product_types: Vec::new(),
+                is_default: true,
+                create_if_missing: true,
+            }],
+            folder_policy: Default::default(),
+        };
+        sm.update(&session.id)
+            .workspace_snapshot(
+                "workspace-id".into(),
+                "Project".into(),
+                None,
+                None,
+                None,
+                context,
+            )
+            .apply()
+            .await
+            .unwrap();
+
+        let reloaded = sm.get_session(&session.id, false).await.unwrap();
+        assert!(
+            !reloaded
+                .additional_working_dirs
+                .contains(&PathBuf::from(&nested_output_path)),
+            "nested product-output folder must not become a separate additional working dir: {:?}",
+            reloaded.additional_working_dirs
+        );
+
+        let copied = sm.copy_session(&session.id, "copy".into()).await.unwrap();
+        assert!(
+            !copied
+                .additional_working_dirs
+                .contains(&PathBuf::from(&nested_output_path)),
+            "copying a session must not resurrect the nested folder as an additional working dir: {:?}",
+            copied.additional_working_dirs
+        );
     }
 
     #[tokio::test]

@@ -1929,6 +1929,22 @@ export const zRenameSessionRequest_unstable = z.object({
 });
 
 /**
+ * Hand a session off to a brand-new one: generates a human-readable
+ * continuation briefing from the source session's conversation, then creates
+ * a fresh session carrying over the same working directory, workspace,
+ * provider/model, and extension configuration (but none of the source
+ * conversation itself).
+ */
+export const zHandoffSessionRequest_unstable = z.object({
+    sessionId: z.string()
+});
+
+export const zHandoffSessionResponse_unstable = z.object({
+    sessionId: z.string(),
+    handoffSummary: z.string().nullish()
+});
+
+/**
  * Archive a session (soft delete).
  */
 export const zArchiveSessionRequest_unstable = z.object({
@@ -2649,6 +2665,7 @@ export const zExtRequest = z.object({
             zTruncateSessionConversationRequest_unstable,
             zUpdateSessionProjectRequest_unstable,
             zRenameSessionRequest_unstable,
+            zHandoffSessionRequest_unstable,
             zArchiveSessionRequest_unstable,
             zUnarchiveSessionRequest_unstable,
             zCreateSourceRequest_unstable,
@@ -2752,6 +2769,7 @@ export const zExtResponse = z.union([
                 zGetOutputRevisionResponse_unstable,
                 zRestoreOutputRevisionResponse_unstable,
                 zGetSessionSummaryResponse_unstable,
+                zHandoffSessionResponse_unstable,
                 zCreateSourceResponse_unstable,
                 zListSourcesResponse_unstable,
                 zListAgentMentionsResponse_unstable,

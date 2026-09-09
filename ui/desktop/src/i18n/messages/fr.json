@@ -3541,5 +3541,20 @@
   },
   "outputHistory.noRevisions": {
     "defaultMessage": "No saved revisions"
+  },
+  "artifactPane.closeAllTabs": {
+    "defaultMessage": "Close all"
+  },
+  "userMessage.queuedSteer": {
+    "defaultMessage": "Queued — will send once the current action finishes"
+  },
+  "sessionActionsHeader.handoffFailed": {
+    "defaultMessage": "Failed to hand off session: {error}"
+  },
+  "sessionActionsHeader.handoffNoSummary": {
+    "defaultMessage": "Started a new session with the same settings. This session's context is managed by its own CLI tool, so Gosling couldn't generate a handoff summary from it."
+  },
+  "sessionActionsHeader.handoffSession": {
+    "defaultMessage": "Hand off to new session"
   }
 }

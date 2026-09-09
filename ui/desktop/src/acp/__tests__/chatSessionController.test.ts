@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Message } from '../../types/message';
+import { AppEvents } from '../../constants/events';
 import { ChatState } from '../../types/chatState';
 import type { Session } from '../../types/session';
 import { acpChatSessionController } from '../chatSessionController';
@@ -11,6 +12,7 @@ import {
 import { acpCancelPrompt, acpPromptSession } from '../prompt';
 import { getAcpConnectionGeneration } from '../acpConnection';
 import {
+  acpHandoffSession,
   acpLoadSession,
   acpListSessionArtifacts,
   acpTruncateSessionConversation,
@@ -53,6 +55,7 @@ vi.mock('../sessions', () => ({
   isAcpSessionLoadInFlight: vi.fn(),
   sessionInfoToSession: vi.fn(),
   acpForkSession: vi.fn(),
+  acpHandoffSession: vi.fn(),
   acpTruncateSessionConversation: vi.fn(),
 }));
 
@@ -129,6 +132,7 @@ function snapshotWithActivePrompt(activePromptAttemptId: string | null): AcpChat
     activePromptAttemptId,
     activeRunId: activePromptAttemptId ? 'run-1' : null,
     pendingCancelPromptAttemptId: null,
+    pendingLocalSteerMessageIds: new Set(),
   };
 }
 
@@ -440,5 +444,53 @@ describe('acpChatSessionController.updateMessage', () => {
       SESSION_ID,
       'attempt-1'
     );
+  });
+});
+
+describe('handoffSession', () => {
+  function listenOnce(): Promise<CustomEvent> {
+    return new Promise((resolve) => {
+      window.addEventListener(
+        AppEvents.SESSION_HANDED_OFF,
+        (event) => resolve(event as CustomEvent),
+        { once: true }
+      );
+    });
+  }
+
+  it('dispatches a session-handed-off event carrying the generated summary', async () => {
+    vi.mocked(acpHandoffSession).mockResolvedValue({
+      sessionId: 'new-session',
+      handoffSummary: 'Goal: finish the thing.',
+    });
+
+    const eventPromise = listenOnce();
+    const result = await acpChatSessionController.handoffSession(SESSION_ID);
+    const event = await eventPromise;
+
+    expect(result).toEqual({ hadSummary: true });
+    expect(event.detail).toEqual({
+      newSessionId: 'new-session',
+      shouldStartAgent: true,
+      initialMessage: 'Goal: finish the thing.',
+    });
+  });
+
+  it('does not ask the new session to auto-start when no summary was generated', async () => {
+    vi.mocked(acpHandoffSession).mockResolvedValue({
+      sessionId: 'new-session',
+      handoffSummary: undefined,
+    });
+
+    const eventPromise = listenOnce();
+    const result = await acpChatSessionController.handoffSession(SESSION_ID);
+    const event = await eventPromise;
+
+    expect(result).toEqual({ hadSummary: false });
+    expect(event.detail).toEqual({
+      newSessionId: 'new-session',
+      shouldStartAgent: false,
+      initialMessage: undefined,
+    });
   });
 });

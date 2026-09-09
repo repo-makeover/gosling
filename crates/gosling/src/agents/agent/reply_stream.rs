@@ -1232,8 +1232,18 @@ impl Agent {
                         .await
                     {
                         crate::hooks::HookDecision::Allow => {
-                            stop_hook_handled_for_exit = true;
-                            break;
+                            // A steer can arrive while the (potentially slow,
+                            // plugin-defined) stop hook above is running, after
+                            // the check that gated entry into this match — catch
+                            // it here too rather than breaking out from under it,
+                            // which would otherwise let `clear_active_run` discard
+                            // it as an ordinary cancellation would (GOS-STEER-001).
+                            if self.has_pending_steers(&session_config.id).await {
+                                retrying_after_stop_hook_denial = true;
+                            } else {
+                                stop_hook_handled_for_exit = true;
+                                break;
+                            }
                         }
                         crate::hooks::HookDecision::Deny { reason, plugin } => {
                             consecutive_stop_hook_blocks += 1;

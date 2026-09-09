@@ -16,6 +16,10 @@ static TEMPLATE_REGISTRY: &[(&str, &str)] = &[
         "Prompt for summarizing conversation history when context limits are reached",
     ),
     (
+        "handoff.md",
+        "Prompt for writing a continuation briefing when handing a session off to a new one",
+    ),
+    (
         "subagent_system.md",
         "System prompt for subagents spawned to handle specific tasks",
     ),

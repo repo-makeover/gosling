@@ -436,6 +436,11 @@
       "responseType": "EmptyResponse"
     },
     {
+      "method": "_gosling/unstable/session/handoff",
+      "requestType": "HandoffSessionRequest_unstable",
+      "responseType": "HandoffSessionResponse_unstable"
+    },
+    {
       "method": "_gosling/unstable/session/archive",
       "requestType": "ArchiveSessionRequest_unstable",
       "responseType": "EmptyResponse"

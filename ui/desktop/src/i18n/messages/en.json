@@ -92,6 +92,9 @@
   "artifactPane.checkingRepositories": {
     "defaultMessage": "Checking repository folders…"
   },
+  "artifactPane.closeAllTabs": {
+    "defaultMessage": "Close all"
+  },
   "artifactPane.closePane": {
     "defaultMessage": "Close inputs and outputs pane"
   },
@@ -2513,6 +2516,15 @@
   "sessionActionsHeader.fullTextTitle": {
     "defaultMessage": "Text value"
   },
+  "sessionActionsHeader.handoffFailed": {
+    "defaultMessage": "Failed to hand off session: {error}"
+  },
+  "sessionActionsHeader.handoffNoSummary": {
+    "defaultMessage": "Started a new session with the same settings. This session's context is managed by its own CLI tool, so Gosling couldn't generate a handoff summary from it."
+  },
+  "sessionActionsHeader.handoffSession": {
+    "defaultMessage": "Hand off to new session"
+  },
   "sessionActionsHeader.importedHistory": {
     "defaultMessage": "Imported history"
   },
@@ -3475,6 +3487,9 @@
   },
   "userMessage.forkSessionTitle": {
     "defaultMessage": "Create a new session with the edited message"
+  },
+  "userMessage.queuedSteer": {
+    "defaultMessage": "Queued — will send once the current action finishes"
   },
   "userMessage.retryButton": {
     "defaultMessage": "Retry"

@@ -75,6 +75,10 @@ const i18n = defineMessages({
     id: 'userMessage.retryButton',
     defaultMessage: 'Retry',
   },
+  queuedSteer: {
+    id: 'userMessage.queuedSteer',
+    defaultMessage: 'Queued — will send once the current action finishes',
+  },
   retryMessageAriaLabel: {
     id: 'userMessage.retryMessageAriaLabel',
     defaultMessage: 'Resend message: {preview}',
@@ -88,10 +92,16 @@ const i18n = defineMessages({
 interface UserMessageProps {
   message: Message;
   canRetry: boolean;
+  isQueuedSteer?: boolean;
   onMessageUpdate?: (messageId: string, newContent: string, editType?: 'fork' | 'edit') => void;
 }
 
-export default function UserMessage({ message, canRetry, onMessageUpdate }: UserMessageProps) {
+export default function UserMessage({
+  message,
+  canRetry,
+  isQueuedSteer = false,
+  onMessageUpdate,
+}: UserMessageProps) {
   const intl = useIntl();
   const contentRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -303,9 +313,17 @@ export default function UserMessage({ message, canRetry, onMessageUpdate }: User
                   </div>
                 )}
 
+                {isQueuedSteer && (
+                  <div
+                    role="status"
+                    className="flex justify-end pt-1 text-right text-xs text-text-secondary"
+                  >
+                    {intl.formatMessage(i18n.queuedSteer)}
+                  </div>
+                )}
                 <div className="relative h-[22px] flex justify-end text-right">
                   <div className="absolute w-40 font-mono right-0 text-xs text-text-secondary pt-1 transition-all duration-200 group-hover:-translate-y-4 group-hover:opacity-0">
-                    {timestamp}
+                    {isQueuedSteer ? null : timestamp}
                   </div>
                   <div className="absolute right-0 pt-1 flex items-center gap-2">
                     <button

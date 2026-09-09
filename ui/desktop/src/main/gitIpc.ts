@@ -67,6 +67,37 @@ async function getGitBranchInfo(dir: string): Promise<{ branch: string } | null>
   }
 }
 
+export function getGitRepoRoot(dir: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!dir?.trim()) {
+      resolve(null);
+      return;
+    }
+
+    execFile(
+      'git',
+      gitArgs(dir, ['rev-parse', '--show-toplevel']),
+      { timeout: 3000 },
+      (error, stdout) => {
+        resolve(error ? null : stdout.trim() || null);
+      }
+    );
+  });
+}
+
+export function isPathGitIgnored(dir: string, targetPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      gitArgs(dir, ['check-ignore', '--quiet', targetPath]),
+      { timeout: 3000 },
+      (error) => {
+        resolve(!error);
+      }
+    );
+  });
+}
+
 export function isValidGitBranch(branch: unknown): branch is string {
   return (
     typeof branch === 'string' &&

@@ -10,6 +10,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
+use tracing::warn;
 use uuid::Uuid;
 
 const MAX_DESCRIPTION_CHARS: usize = 2_000;
@@ -273,7 +274,8 @@ impl WorkspaceService {
         if !super::validation::is_native_workspace_path(&path.to_string_lossy()) {
             bail!("output folder is unavailable on this platform");
         }
-        std::fs::create_dir_all(path)?;
+        std::fs::create_dir_all(&path)?;
+        ensure_gitignored_if_in_repo(&path);
         self.validate(&WorkspaceMutation::from(&workspace))
     }
 
@@ -593,6 +595,48 @@ pub(super) fn validate_workspace_boundary(mutation: &WorkspaceMutation) -> Resul
         bail!(message);
     }
     Ok(())
+}
+
+/// Adds `path` to a `.gitignore` beside it when `path` sits inside a git
+/// repository and isn't already covered by an existing ignore rule. A
+/// workspace output folder is gosling's own scratch space, not something the
+/// user's repo should track by default. Best-effort: a failure here must
+/// never block the folder from being created.
+fn ensure_gitignored_if_in_repo(path: &Path) {
+    if crate::hints::find_git_root(path).is_none() {
+        return;
+    }
+    if crate::hints::build_gitignore(path)
+        .matched(path, true)
+        .is_ignore()
+    {
+        return;
+    }
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return;
+    };
+
+    let gitignore_path = parent.join(".gitignore");
+    let mut contents = std::fs::read_to_string(&gitignore_path).unwrap_or_default();
+    let entry = format!("/{name}/");
+    if contents.lines().any(|line| line.trim() == entry) {
+        return;
+    }
+    if !contents.is_empty() && !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+    contents.push_str(&entry);
+    contents.push('\n');
+    if let Err(error) = std::fs::write(&gitignore_path, contents) {
+        warn!(
+            path = %gitignore_path.display(),
+            %error,
+            "Failed to add output folder to .gitignore"
+        );
+    }
 }
 
 fn validate_optional_text(value: &Option<String>, label: &str, max_chars: usize) -> Result<()> {
@@ -998,6 +1042,42 @@ mod tests {
         if !cfg!(windows) {
             assert!(!Path::new(foreign).exists());
         }
+    }
+
+    #[tokio::test]
+    async fn create_output_folder_gitignores_it_when_working_folder_is_a_repo() {
+        let data = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join(".git")).unwrap();
+        let service = WorkspaceService::initialize(data.path(), root.path())
+            .await
+            .unwrap();
+        let workspace = service.create(mutation(root.path())).await.unwrap();
+
+        service
+            .create_output_folder(&workspace.id, "output")
+            .await
+            .unwrap();
+
+        let gitignore = std::fs::read_to_string(root.path().join(".gitignore")).unwrap();
+        assert_eq!(gitignore, "/outputs/\n");
+    }
+
+    #[tokio::test]
+    async fn create_output_folder_leaves_gitignore_untouched_outside_a_repo() {
+        let data = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let service = WorkspaceService::initialize(data.path(), root.path())
+            .await
+            .unwrap();
+        let workspace = service.create(mutation(root.path())).await.unwrap();
+
+        service
+            .create_output_folder(&workspace.id, "output")
+            .await
+            .unwrap();
+
+        assert!(!root.path().join(".gitignore").exists());
     }
 
     #[test]

@@ -563,6 +563,21 @@ export async function acpForkSession(
   return String(response.sessionId);
 }
 
+export interface HandoffSessionResult {
+  sessionId: string;
+  /** Absent when the source session's provider manages its own context. */
+  handoffSummary?: string;
+}
+
+export async function acpHandoffSession(sessionId: string): Promise<HandoffSessionResult> {
+  const client = await getAcpClient();
+  const response = await client.gosling.sessionHandoff_unstable({ sessionId });
+  return {
+    sessionId: response.sessionId,
+    handoffSummary: response.handoffSummary ?? undefined,
+  };
+}
+
 export async function acpExportSession(sessionId: string): Promise<string> {
   const client = await getAcpClient();
   const response = await client.gosling.sessionExport_unstable({ sessionId });

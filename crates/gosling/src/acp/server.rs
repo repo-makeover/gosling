@@ -110,6 +110,7 @@ mod elicitation;
 mod extension_selection;
 mod extensions;
 mod fork_session;
+mod handoff_session;
 mod initialization;
 mod list_sessions;
 mod load_session;
