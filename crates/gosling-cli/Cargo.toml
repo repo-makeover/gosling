@@ -71,7 +71,6 @@ winapi = { workspace = true }
 
 [features]
 default = [
-    "code-mode",
     "tui",
     "aws-providers",
     "nostr",

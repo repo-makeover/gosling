@@ -8,7 +8,7 @@ stable ownership for source-local markers.
 
 | ID | File | Line/Area | Type | Status | Owner/Context | Disposition |
 |---|---|---|---|---|---|---|
-| POLISH-20260827-001 | `crates/gosling-server/src/commands/agent.rs` | startup bridge | migration | deferred | Desktop / ACP migration | Remove the goslingd ACP bridge only after Desktop launches `gosling serve` directly and the inherited setup is verified. |
+| POLISH-20260827-001 | `crates/gosling-server/src/commands/agent.rs` | startup bridge | migration | resolved (2026-09-09) | Desktop / ACP migration | Verified nothing in the workspace depends on `gosling-server`, no CI workflow builds it, and `justfile`'s packaging steps already strip any `goslingd` binary before shipping Desktop — confirming Desktop already launches `gosling serve` directly. Removed the `gosling-server` crate (including this bridge) and its dead `openapi.json`/doc references. |
 | POLISH-20260827-002 | `crates/gosling-test-support/src/session.rs`; `crates/gosling/tests/acp_common_tests/mod.rs` | OpenAI fixtures | test coverage | open | Provider test fixtures | Add Responses API SSE fixtures before routing these tests through Responses-only models. |
 | POLISH-20260827-003 | `crates/gosling-providers/src/canonical.rs` | recommended models | product design | deferred | Provider discovery | Decide whether recommended-model discovery should reconcile the bundled registry with live provider APIs. |
 | POLISH-20260827-004 | `crates/gosling/tests/acp_fixtures/mod.rs` | test data roots | architecture | blocked | Runtime path ownership | Scope process-global path access before making the ACP fixture data root fully isolated. |

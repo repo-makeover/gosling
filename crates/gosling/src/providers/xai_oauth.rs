@@ -7,10 +7,10 @@ use super::openai_compatible::OpenAiCompatibleProvider;
 use super::xai::{SUPERGROK_API_HOST, SUPERGROK_DEFAULT_MODEL, SUPERGROK_MODELS};
 use crate::config::paths::Paths;
 use crate::conversation::message::Message;
+use crate::providers::PkceChallenge;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use axum::{extract::Query, response::Html, routing::get, Router};
-use base64::Engine;
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use gosling_providers::errors::ProviderError;
@@ -18,7 +18,6 @@ use gosling_providers::model::ModelConfig;
 use gosling_providers::thinking::ThinkingEffort;
 use rmcp::model::Tool;
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
 use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -251,25 +250,6 @@ impl TokenCache {
     fn clear(&self) {
         let _ = std::fs::remove_file(&self.cache_path);
     }
-}
-
-struct PkceChallenge {
-    verifier: String,
-    challenge: String,
-}
-
-fn generate_pkce() -> PkceChallenge {
-    let verifier = nanoid::nanoid!(64);
-    let digest = sha2::Sha256::digest(verifier.as_bytes());
-    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-    PkceChallenge {
-        verifier,
-        challenge,
-    }
-}
-
-fn generate_state() -> String {
-    nanoid::nanoid!(32)
 }
 
 fn redirect_uri() -> String {
@@ -656,9 +636,9 @@ async fn perform_loopback_oauth_flow(auth_state: &XaiAuthState) -> Result<TokenD
         anyhow!("Another xAI OAuth flow is already in progress; please try again later")
     })?;
 
-    let pkce = generate_pkce();
-    let csrf_state = generate_state();
-    let nonce = generate_state();
+    let pkce = crate::providers::generate_pkce(64);
+    let csrf_state = crate::providers::generate_oauth_state();
+    let nonce = crate::providers::generate_oauth_state();
     let auth_url = build_authorize_url(&pkce, &csrf_state, &nonce)?;
 
     let (tx, rx) = oneshot::channel::<Result<String>>();
@@ -969,7 +949,7 @@ mod tests {
 
     #[test]
     fn pkce_challenge_is_url_safe_base64_of_sha256_of_verifier() {
-        let pkce = generate_pkce();
+        let pkce = crate::providers::generate_pkce(64);
         assert_eq!(pkce.verifier.len(), 64);
         // S256 of a 64-char ASCII verifier => 32-byte digest => 43 base64url chars (no padding).
         assert_eq!(pkce.challenge.len(), 43);

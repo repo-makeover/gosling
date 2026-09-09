@@ -32,7 +32,7 @@ When the app starts with sandboxing enabled, it will:
 
 1. Generate a seatbelt sandbox profile
 2. Start a local HTTP CONNECT proxy on localhost
-3. Launch the `goslingd` backend for gosling Desktop inside `sandbox-exec`, forcing all traffic through the proxy
+3. Launch the gosling backend for gosling Desktop inside `sandbox-exec`, forcing all traffic through the proxy
 
 The sandbox remains active until you quit gosling Desktop. To disable it, quit the app and relaunch normally (or set `GOSLING_SANDBOX=false` when opening from the terminal).
 
@@ -70,7 +70,7 @@ The [seatbelt sandbox profile](https://github.com/cephalopod-ai/gosling/blob/mai
 
 The seatbelt sandbox denies all direct network access, forcing traffic through the proxy. The only allowed connections are:
 
-- **Localhost** — Allows the `goslingd` process to reach the egress proxy and its own server port
+- **Localhost** — Allows the gosling backend process to reach the egress proxy and its own server port
 - **Unix sockets** — For local inter-process communication (IPC)
 - **mDNSResponder** — For DNS resolution
 

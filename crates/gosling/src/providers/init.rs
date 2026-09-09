@@ -12,7 +12,6 @@ use super::{
     chatgpt_codex::ChatGptCodexProvider,
     claude_acp::ClaudeAcpProvider,
     claude_code::ClaudeCodeProvider,
-    codex::CodexProvider,
     codex_acp::CodexAcpProvider,
     copilot_acp::CopilotAcpProvider,
     cursor_agent::CursorAgentProvider,
@@ -80,7 +79,6 @@ async fn init_registry() -> RwLock<ProviderRegistry> {
             false,
             Some(registrations::copilot_acp_inventory()),
         );
-        registry.register::<CodexProvider>(true);
         registry.register::<CursorAgentProvider>(false);
         registry.register_with_inventory::<DatabricksProvider>(
             true,

@@ -6,15 +6,10 @@ mod export;
 mod input;
 mod output;
 pub mod streaming_buffer;
-mod task_execution_display;
 mod thinking;
 
-use crate::session::task_execution_display::{
-    format_task_execution_notification, TASK_EXECUTION_NOTIFICATION_TYPE,
-};
 use gosling::conversation::Conversation;
 use std::env;
-use std::io::Write;
 use std::str::FromStr;
 use tokio::signal::ctrl_c;
 use tokio_util::task::AbortOnDropHandle;
@@ -2204,8 +2199,6 @@ fn format_logging_notification(
             } else if let Some(Value::String(output)) = o.get("output") {
                 let notification_type = o.get("type").and_then(|v| v.as_str()).map(str::to_string);
                 (output.to_owned(), None, notification_type)
-            } else if let Some(result) = format_task_execution_notification(data) {
-                result
             } else {
                 (data.to_string(), None, None)
             }
@@ -2233,17 +2226,7 @@ fn display_log_notification(
             progress_bars.log(formatted_message);
         }
     } else if let Some(ntype) = notification_type {
-        if ntype == TASK_EXECUTION_NOTIFICATION_TYPE {
-            if interactive {
-                let _ = progress_bars.hide();
-            }
-            if !is_json_mode {
-                for line in formatted_message.lines() {
-                    println!("    {}", console::style(line).dim());
-                }
-                std::io::stdout().flush().unwrap();
-            }
-        } else if ntype == "shell_output" {
+        if ntype == "shell_output" {
             let config = Config::global();
             let min_priority = config
                 .get_param::<f32>("GOSLING_CLI_MIN_PRIORITY")

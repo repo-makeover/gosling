@@ -9,6 +9,7 @@ use crate::providers::base::{
 };
 use crate::providers::openai_compatible::handle_status;
 use crate::providers::retry::ProviderRetry;
+use crate::providers::PkceChallenge;
 use anyhow::{anyhow, Result};
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -25,7 +26,6 @@ use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
 use rmcp::model::{RawContent, Role, Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::Digest;
 use std::io;
 use std::net::SocketAddr;
 use std::ops::Deref;
@@ -613,25 +613,6 @@ async fn extract_account_id(
         .and_then(|claims| account_id_from_claims(&claims))
 }
 
-struct PkceChallenge {
-    verifier: String,
-    challenge: String,
-}
-
-fn generate_pkce() -> PkceChallenge {
-    let verifier = nanoid::nanoid!(43);
-    let digest = sha2::Sha256::digest(verifier.as_bytes());
-    let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-    PkceChallenge {
-        verifier,
-        challenge,
-    }
-}
-
-fn generate_state() -> String {
-    nanoid::nanoid!(32)
-}
-
 fn build_authorize_url(redirect_uri: &str, pkce: &PkceChallenge, state: &str) -> Result<String> {
     let scopes = OAUTH_SCOPES.join(" ");
     let params = [
@@ -910,8 +891,8 @@ async fn perform_oauth_flow(auth_state: &ChatGptCodexAuthState) -> Result<TokenD
         anyhow!("Another OAuth flow is already in progress; please try again later")
     })?;
 
-    let pkce = generate_pkce();
-    let csrf_state = generate_state();
+    let pkce = crate::providers::generate_pkce(43);
+    let csrf_state = crate::providers::generate_oauth_state();
     let redirect_uri = format!("http://localhost:{}/auth/callback", OAUTH_PORT);
     let auth_url = build_authorize_url(&redirect_uri, &pkce, &csrf_state)?;
 

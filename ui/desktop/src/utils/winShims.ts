@@ -20,7 +20,7 @@ export async function ensureWinShims(): Promise<void> {
   try {
     await fs.promises.mkdir(tgtDir, { recursive: true });
 
-    // Copy command-line tools, NOT goslingd.exe (which should always be used locally)
+    // Copy command-line tools only, not the bundled gosling backend binaries
     const shims = ['uvx.exe', 'uv.exe', 'npx.cmd'];
 
     await Promise.all(

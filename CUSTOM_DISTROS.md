@@ -24,13 +24,9 @@ gosling's architecture is designed for extensibility. Organizations can create "
 │  └──────┬──────┘  └──────┬──────┘  └────────────┬────────────┘  │
 └─────────┼────────────────┼──────────────────────┼───────────────┘
           │                │                      │
+          │ (linked        │ (spawns              │ (ACP over
+          │  library)      │  `gosling serve`)     │  stdio/WebSocket)
           ▼                ▼                      ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    gosling-server (goslingd)                        │
-│         REST API for all gosling functionality                    │
-└─────────────────────────────────────────────────────────────────┘
-          │
-          ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Core (gosling crate)                         │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
@@ -39,6 +35,8 @@ gosling's architecture is designed for extensibility. Organizations can create "
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+CLI and Desktop both link the `gosling` core crate directly rather than going through a separate server process; Desktop reaches it by spawning `gosling serve` as a child process and speaking ACP over WebSocket. A standalone `gosling-server` REST API crate previously existed for HTTP-based integrations but was removed as unused — see [Building a New Interface](#e-building-a-new-interface-web-mobile-etc) below for the current recommended integration path for a custom UI.
 
 ## Key Customization Points
 
@@ -50,7 +48,7 @@ gosling's architecture is designed for extensibility. Organizations can create "
 | Bundle custom MCP extensions | `config.yaml` extensions section, `ui/desktop/src/built-in-extensions.json`, `ui/desktop/src/components/settings/extensions/bundled-extensions.json` | Medium |
 | Modify system prompts | `crates/gosling/src/prompts/` | Low |
 | Customize desktop branding | `ui/desktop/` (icons, names, colors) | Medium |
-| Build a new UI (web, mobile) | Integrate with `gosling-server` REST API | High |
+| Build a new UI (web, mobile) | Integrate via the Agent Client Protocol (ACP) | High |
 | Build complex multi-step workflows | Subagents | Medium |
 
 ## Getting Started
@@ -288,38 +286,9 @@ export GOSLING_BUNDLE_NAME="InsightStream-gosling"
 
 **Goal**: Create an entirely new frontend while leveraging gosling's backend.
 
-gosling provides two integration options for building custom UIs:
+gosling's supported integration path for building custom UIs is the Agent Client Protocol (ACP). A `gosling-server` REST API crate previously existed as an alternative but was removed as unused (nothing in this workspace built or shipped it); if a REST-based integration surface is needed again, it would need to be rebuilt rather than resurrected from history.
 
-### Option 1: REST API (gosling-server)
-
-Use gosling-server for HTTP-based integrations (web apps, simple clients):
-
-```bash
-# Start the server
-./target/release/goslingd
-
-# API available at http://localhost:3000
-```
-
-**Reference the OpenAPI spec** at `ui/desktop/openapi.json` for available endpoints:
-- Session management
-- Message streaming  
-- Extension control
-- Configuration
-
-**Key endpoints** for a minimal integration:
-
-```
-POST /sessions              # Create a new session
-POST /sessions/{id}/messages # Send a message (streaming response)
-GET  /sessions/{id}         # Get session state
-GET  /extensions            # List available extensions
-POST /extensions/{name}/enable  # Enable an extension
-```
-
-**Handle streaming responses** - gosling uses Server-Sent Events (SSE) for real-time responses.
-
-### Option 2: Agent Client Protocol (ACP)
+### Agent Client Protocol (ACP)
 
 For richer integrations (IDEs, desktop apps, embedded agents), use the **Agent Client Protocol (ACP)**—a standardized JSON-RPC protocol for AI agent communication over stdio or other transports.
 
@@ -394,15 +363,11 @@ For the full ACP specification, see the [Agent Client Protocol documentation](ht
 
 ### Technical Details
 
-**REST API (gosling-server)**:
-- Server implementation: `crates/gosling-server/src/routes/`
-- OpenAPI generation: `just generate-openapi`
-- SDK client implementation: `ui/sdk/src/` (generated ACP types and TypeScript client)
-
 **ACP**:
 - ACP server implementation: `crates/gosling/src/acp/server.rs`
 - CLI integration: `crates/gosling-cli/src/cli.rs` (Command::Acp)
 - Protocol library: `agent-client-protocol` crate (Rust implementation of ACP)
+- SDK client implementation: `ui/sdk/src/` (generated ACP types and TypeScript client)
 - Test client example: `test_acp_client.py`
 
 ---

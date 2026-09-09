@@ -292,15 +292,6 @@ pub(crate) fn parse_skill_frontmatter(raw: &str) -> (String, String) {
     }
 }
 
-/// Every directory the agent reads skills from, paired with whether each is a
-/// global (home-rooted) location. Order matches discovery precedence: project
-/// dirs first, then global dirs.
-pub fn all_skill_dirs(working_dir: Option<&Path>) -> Vec<(PathBuf, bool)> {
-    let mut dirs = project_skill_dirs(working_dir);
-    dirs.extend(global_skill_dirs());
-    dirs
-}
-
 fn project_skill_dirs(working_dir: Option<&Path>) -> Vec<(PathBuf, bool)> {
     let mut dirs = Vec::new();
 

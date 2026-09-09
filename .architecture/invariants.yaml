@@ -1,22 +1,6 @@
 version: 1
 
 invariants:
-  - id: ARC-001
-    title: Route adapters stay thin
-    status: active
-    scope:
-      - crates/gosling-server/src/routes
-    rule: route modules may own transport parsing and framing, but shared reply workflow belongs in a service-layer owner
-    checks:
-      - sibling route modules do not import business-flow helpers from each other
-
-  - id: ARC-002
-    title: Reply lifecycle has one owner
-    status: active
-    scope:
-      - crates/gosling-server/src/routes/reply_service.rs
-    rule: override handling, rollback policy, reply stream iteration, event normalization, and reply-path telemetry are implemented once and reused by every reply transport
-
   - id: ARC-003
     title: Electron privilege boundary is contract-backed
     status: active

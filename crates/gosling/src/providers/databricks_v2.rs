@@ -27,10 +27,7 @@ use super::openai_compatible::{handle_status, stream_openai_compat, stream_respo
 use super::retry::ProviderRetry;
 use crate::config::ConfigError;
 use crate::conversation::message::Message;
-use crate::providers::retry::{
-    RetryConfig, DEFAULT_BACKOFF_MULTIPLIER, DEFAULT_INITIAL_RETRY_INTERVAL_MS,
-    DEFAULT_MAX_RETRIES, DEFAULT_MAX_RETRY_INTERVAL_MS,
-};
+use crate::providers::retry::RetryConfig;
 use gosling_providers::errors::ProviderError;
 use gosling_providers::formats::openai_responses;
 use gosling_providers::model::ModelConfig;
@@ -132,36 +129,7 @@ impl DatabricksV2Provider {
     }
 
     fn load_retry_config(config: &crate::config::Config) -> RetryConfig {
-        let max_retries = config
-            .get_param("DATABRICKS_MAX_RETRIES")
-            .ok()
-            .and_then(|v: String| v.parse::<usize>().ok())
-            .unwrap_or(DEFAULT_MAX_RETRIES);
-
-        let initial_interval_ms = config
-            .get_param("DATABRICKS_INITIAL_RETRY_INTERVAL_MS")
-            .ok()
-            .and_then(|v: String| v.parse::<u64>().ok())
-            .unwrap_or(DEFAULT_INITIAL_RETRY_INTERVAL_MS);
-
-        let backoff_multiplier = config
-            .get_param("DATABRICKS_BACKOFF_MULTIPLIER")
-            .ok()
-            .and_then(|v: String| v.parse::<f64>().ok())
-            .unwrap_or(DEFAULT_BACKOFF_MULTIPLIER);
-
-        let max_interval_ms = config
-            .get_param("DATABRICKS_MAX_RETRY_INTERVAL_MS")
-            .ok()
-            .and_then(|v: String| v.parse::<u64>().ok())
-            .unwrap_or(DEFAULT_MAX_RETRY_INTERVAL_MS);
-
-        RetryConfig::new(
-            max_retries,
-            initial_interval_ms,
-            backoff_multiplier,
-            max_interval_ms,
-        )
+        crate::providers::load_retry_config_from_env(config, "DATABRICKS", RetryConfig::default())
     }
 
     fn route_for_model(model_name: &str) -> DatabricksV2Route {
@@ -170,7 +138,7 @@ impl DatabricksV2Provider {
 
         if is_openai_responses_model(&clean_name) || Self::looks_like_gpt5(&lower) {
             DatabricksV2Route::OpenAiResponses
-        } else if Self::is_claude_model(&lower) {
+        } else if crate::providers::is_claude_model(&lower) {
             DatabricksV2Route::AnthropicMessages
         } else {
             DatabricksV2Route::MlflowChatCompletions
@@ -179,10 +147,6 @@ impl DatabricksV2Provider {
 
     fn looks_like_gpt5(model_name: &str) -> bool {
         model_name.contains("gpt-5") || model_name.contains("gpt5")
-    }
-
-    fn is_claude_model(model_name: &str) -> bool {
-        model_name.contains("claude")
     }
 
     fn parse_list_endpoints_response(

@@ -11,9 +11,10 @@
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
-use rmcp::model::{CallToolRequestParams, CallToolResult, Content, ErrorCode, ErrorData};
+use rmcp::model::{CallToolRequestParams, CallToolResult, Content};
 use serde_json::{json, Map, Value};
 
+use super::{build_tool_result, extract_first_text};
 use crate::conversation::message::Message;
 use crate::conversation::Conversation;
 use gosling_providers::conversation::token_usage::Usage;
@@ -296,41 +297,6 @@ fn apply_assistant_content(mut msg: Message, content: Option<&Value>) -> Message
         }
     }
     msg
-}
-
-fn build_tool_result(content: Option<&Value>, is_error: bool) -> Result<CallToolResult, ErrorData> {
-    let text = match content {
-        Some(Value::String(s)) => s.clone(),
-        Some(Value::Array(blocks)) => blocks
-            .iter()
-            .filter_map(|b| {
-                let bt = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                match bt {
-                    "text" => b.get("text").and_then(|v| v.as_str()).map(str::to_string),
-                    _ => Some(serde_json::to_string(b).unwrap_or_default()),
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-        Some(other) => other.to_string(),
-        None => String::new(),
-    };
-
-    if is_error {
-        Err(ErrorData::new(ErrorCode::INTERNAL_ERROR, text, None))
-    } else {
-        Ok(CallToolResult::success(vec![Content::text(text)]))
-    }
-}
-
-fn extract_first_text(msg: &Message) -> Option<String> {
-    use crate::conversation::message::MessageContent;
-    for c in &msg.content {
-        if let MessageContent::Text(t) = c {
-            return Some(t.text.clone());
-        }
-    }
-    None
 }
 
 #[cfg(test)]

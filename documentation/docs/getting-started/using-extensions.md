@@ -267,7 +267,7 @@ gosling://extension?cmd=<command>&arg=<argument>&id=<id>&name=<name>&description
 ```
 
 Required parameters:
-- `cmd`: The base command to run, one of `jbang`, `npx`, `uvx`, `goslingd`, or `docker`
+- `cmd`: The base command to run, one of `jbang`, `npx`, `uvx`, or `docker`
 - `arg`: (cmd only) Command arguments (can be repeated for multiple arguments: `&arg=...&arg=...`)
 - `timeout`: Maximum time (in seconds) to wait for extension responses
 - `id`: Unique identifier for the extension

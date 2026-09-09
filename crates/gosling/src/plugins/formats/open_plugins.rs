@@ -1,8 +1,8 @@
 //! Open Plugins format adapter (<https://open-plugins.com>).
 
 use crate::plugins::{
-    copy_dir_all, validated_skill_name, write_install_metadata, FormatNotSupported, ImportedSkill,
-    PluginFormat, PluginInstall, PluginInstallOptions,
+    collect_skill_candidate, copy_dir_all, write_install_metadata, FormatNotSupported,
+    ImportedSkill, PluginFormat, PluginInstall, PluginInstallOptions, SkillCandidate,
 };
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
@@ -30,12 +30,6 @@ pub struct OpenPluginsManifest {
     pub skills: Option<serde_json::Value>,
     #[serde(default, rename = "mcpServers")]
     pub mcp_servers: Option<serde_json::Value>,
-}
-
-#[derive(Debug)]
-struct SkillCandidate {
-    name: String,
-    relative_directory: PathBuf,
 }
 
 pub(in crate::plugins) fn try_install_from_manifest_at_root(
@@ -426,28 +420,6 @@ fn collect_skill_candidates(
             collect_skill_candidate(plugin_dir, &path, skills)?;
         }
     }
-
-    Ok(())
-}
-
-fn collect_skill_candidate(
-    plugin_dir: &Path,
-    skill_dir: &Path,
-    skills: &mut Vec<SkillCandidate>,
-) -> Result<()> {
-    let skill_file = skill_dir.join("SKILL.md");
-    if !skill_file.is_file() {
-        return Ok(());
-    }
-
-    let raw = fs::read_to_string(&skill_file)?;
-    let name = validated_skill_name(&raw, &skill_file)?;
-    let relative_directory = skill_dir.strip_prefix(plugin_dir)?.to_path_buf();
-
-    skills.push(SkillCandidate {
-        name,
-        relative_directory,
-    });
 
     Ok(())
 }

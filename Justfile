@@ -24,8 +24,6 @@ release-binary:
     @echo "Building release version..."
     ./scripts/with-rusty-v8-cache.sh cargo build --release -p gosling-cli --bin gosling
     @just copy-binary
-    @echo "Generating OpenAPI schema..."
-    ./scripts/with-rusty-v8-cache.sh cargo run -p gosling-server --bin generate_schema
 
 # Build Windows executable on a Windows host
 [unix]
@@ -151,11 +149,6 @@ run-docs:
 run-server:
     @echo "Running external ACP backend..."
     GOSLING_SERVER__SECRET_KEY="${GOSLING_SERVER__SECRET_KEY:-test}" cargo run -p gosling-cli --bin gosling -- serve --platform desktop --host 127.0.0.1 --port 3000
-
-# Generate OpenAPI specification without starting the UI
-generate-openapi:
-    @echo "Generating OpenAPI schema..."
-    cargo run -p gosling-server --bin generate_schema
 
 # Check if generated ACP schema and TypeScript types are up-to-date
 check-acp-schema: generate-acp-types
@@ -364,7 +357,6 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 ### profile = --release or "" for debug
 ### allparam = OR/AND/ANY/NONE --workspace --all-features --all-targets
 win-bld profile allparam:
-  cargo run {{profile}} -p gosling-server --bin  generate_schema
   cargo build {{profile}} {{allparam}}
 
 ### Build just debug

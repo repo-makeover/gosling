@@ -2,7 +2,7 @@
 // Extracted from `summon.rs` in a behavior-preserving modularization.
 // The `summon` compatibility facade keeps delegation behind `SummonClient` and MCP dispatch.
 
-use super::delegate_config::{delegate_mode, delegate_mode_notice, sync_delegate_timeout};
+use super::delegate_config::{delegate_mode_notice, sync_delegate_timeout, PreparedDelegate};
 use super::*;
 
 /// How long a timed-out synchronous delegate is given to unwind after its
@@ -122,49 +122,15 @@ impl SummonClient {
             return Ok(CallToolResult::success(content).with_meta(Some(meta)));
         }
 
-        let working_dir = session.working_dir.clone();
-        let spec = self.build_delegate_spec(&params, &working_dir).await?;
-
-        let task_config = self
-            .build_task_config(&params, &spec, &session)
-            .await
-            .map_err(|e| format!("Failed to build task config: {}", e))?;
-        let subagent_mode = delegate_mode(task_config.provider.executes_tools_outside_gosling());
-
-        // Hosted-tool subagents use Auto because no UI is attached to answer
-        // approval prompts. External-tool providers cannot safely use Auto;
-        // Chat mode keeps those providers available for bounded text work while
-        // rejecting their delegated tool calls at the ACP boundary.
-        let agent_config = AgentConfig::new(
-            self.context.session_manager.clone(),
-            crate::config::permission::PermissionManager::instance(),
+        let PreparedDelegate {
+            spec,
+            task_config,
             subagent_mode,
-            true, // disable session naming for subagents
-            crate::agents::GoslingPlatform::GoslingCli,
-        )
-        .with_code_execution_runtime(self.context.code_execution_runtime)
-        .with_use_login_shell_path(self.context.use_login_shell_path);
-
-        let subagent_session = self
-            .context
-            .session_manager
-            .create_session(
-                task_config.parent_working_dir.clone(),
-                "Delegated task".to_string(),
-                SessionType::SubAgent,
-                subagent_mode,
-            )
-            .await
-            .map_err(|e| format!("Failed to create subagent session: {}", e))?;
-        self.context
-            .session_manager
-            .merge_extension_state(
-                &subagent_session.id,
-                "output_agent.v1",
-                serde_json::json!({ "name": params.source, "parentSessionId": session_id }),
-            )
-            .await
-            .map_err(|e| format!("Failed to record subagent identity: {e}"))?;
+            agent_config,
+            subagent_session,
+        } = self
+            .prepare_delegate(session_id, &params, &session, "Delegated task".to_string())
+            .await?;
 
         let (notif_tx, notif_rx) = tokio::sync::mpsc::unbounded_channel::<ServerNotification>();
         Self::spawn_notification_bridge(

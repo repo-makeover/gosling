@@ -1633,45 +1633,6 @@ impl Config {
 
 config_value!(GOSLING_DEFAULT_EXTENSION_TIMEOUT, u64);
 
-fn find_workspace_or_exe_root() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let exe_dir = exe.parent()?.to_path_buf();
-
-    let mut path = exe;
-    while let Some(parent) = path.parent() {
-        let cargo_toml = parent.join("Cargo.toml");
-        if cargo_toml.exists() {
-            if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
-                if content.contains("[workspace]") {
-                    return Some(parent.to_path_buf());
-                }
-            }
-        }
-        path = parent.to_path_buf();
-    }
-
-    Some(exe_dir)
-}
-
-pub fn load_init_config_from_workspace() -> Result<Mapping, ConfigError> {
-    let root = find_workspace_or_exe_root().ok_or_else(|| {
-        ConfigError::FileError(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Could not determine executable path",
-        ))
-    })?;
-
-    let init_config_path = root.join("init-config.yaml");
-    if !init_config_path.exists() {
-        return Err(ConfigError::NotFound(
-            "init-config.yaml not found".to_string(),
-        ));
-    }
-
-    let init_content = std::fs::read_to_string(&init_config_path)?;
-    parse_yaml_content(&init_content)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

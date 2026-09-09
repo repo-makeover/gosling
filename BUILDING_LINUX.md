@@ -61,12 +61,6 @@ Build Gosling CLI:
 cargo build --release -p gosling-cli
 ```
 
-Build Gosling Server:
-
-```bash
-cargo build --release -p gosling-server
-```
-
 This command should give you a list of possible packages in the
 workspace:
 
@@ -79,9 +73,9 @@ cargo test -p
 cd ui/desktop
 pnpm install
 
-# Copy the server binary to the expected location
+# Copy the CLI binary to the expected location
 mkdir -p src/bin
-cp ../../target/release/goslingd src/bin/
+cp ../../target/release/gosling src/bin/
 ```
 
 ### 4. Build the Application
@@ -143,9 +137,9 @@ cd /path/to/gosling/ui/desktop/out/gosling-linux-x64
 ```
 
 #### Server Binary Not Found
-If you see "Could not find goslingd binary", ensure you've:
-1. Built the Rust backend: `cargo build --release -p gosling-server`
-2. Copied it to the right location: `cp ../../target/release/goslingd src/bin/`
+If you see "Could not find gosling binary", ensure you've:
+1. Built the Rust CLI: `cargo build --release -p gosling-cli`
+2. Copied it to the right location: `cp ../../target/release/gosling src/bin/`
 3. Rebuilt the application: `pnpm run make`
 
 ### Distribution-Specific Notes
@@ -176,7 +170,7 @@ Building as Snap packages is not currently supported but may be added in the fut
 
 For active development:
 
-1. **Backend changes**: Rebuild with `cargo build --release -p gosling-server` and copy the binary
+1. **Backend changes**: Rebuild with `cargo build --release -p gosling-cli` and copy the binary
 2. **Frontend changes**: Use `pnpm run start` for hot reload during development
 3. **Full rebuild**: Run the complete build process above
 

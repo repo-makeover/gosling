@@ -111,3 +111,11 @@ incremental = false
 # full debug info and stay fully debuggable; release builds are unaffected.
 [profile.dev.package."*"]
 debug = false
+
+# Release builds shipped to users: strip symbols, enable thin LTO, and use a
+# single codegen unit so LLVM can eliminate cross-crate dead code and
+# duplicate monomorphizations. None of this affects `[profile.dev]` above.
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

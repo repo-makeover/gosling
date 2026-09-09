@@ -410,7 +410,7 @@ async fn get_or_create_session_id(
 
     let session_manager = SessionManager::instance();
 
-    let resolved_id = if resume {
+    if resume {
         let Some(id) = identifier else {
             let sessions = session_manager.list_sessions().await?;
             let session_id = sessions
@@ -419,66 +419,67 @@ async fn get_or_create_session_id(
                 .ok_or_else(|| anyhow::anyhow!("No session found to resume"))?;
             return Ok(Some(session_id));
         };
+        return lookup_session_id(id).await.map(Some);
+    }
 
-        if let Some(session_id) = id.session_id {
-            session_id
-        } else if let Some(name) = id.name {
-            let sessions = session_manager.list_sessions().await?;
-            sessions
-                .into_iter()
-                .find(|s| s.name == name || s.id == name)
-                .map(|s| s.id)
-                .ok_or_else(|| anyhow::anyhow!("No session found with name '{}'", name))?
-        } else if let Some(path) = id.path {
-            path.file_stem()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string())
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Could not extract session ID from path: {:?}", path)
-                })?
-        } else {
-            return Err(anyhow::anyhow!("Invalid identifier"));
-        }
-    } else {
-        let Some(id) = identifier else {
-            let session = session_manager
-                .create_session(
-                    std::env::current_dir()?,
-                    "CLI Session".to_string(),
-                    SessionType::User,
-                    gosling_mode,
-                )
-                .await?;
-            return Ok(Some(session.id));
-        };
-
-        if id.session_id.is_some() {
-            return Err(anyhow::anyhow!("Cannot use --session-id without --resume"));
-        }
-
-        let has_user_provided_name = id.name.is_some();
-        let name = id.name.unwrap_or_else(|| "CLI Session".to_string());
+    let Some(id) = identifier else {
         let session = session_manager
             .create_session(
                 std::env::current_dir()?,
-                name.clone(),
+                "CLI Session".to_string(),
                 SessionType::User,
                 gosling_mode,
             )
             .await?;
-
-        if has_user_provided_name {
-            session_manager
-                .update(&session.id)
-                .user_provided_name(name)
-                .apply()
-                .await?;
-        }
-
         return Ok(Some(session.id));
     };
 
-    Ok(Some(resolved_id))
+    if id.session_id.is_some() {
+        return Err(anyhow::anyhow!("Cannot use --session-id without --resume"));
+    }
+
+    let has_user_provided_name = id.name.is_some();
+    let name = id.name.unwrap_or_else(|| "CLI Session".to_string());
+    let session = session_manager
+        .create_session(
+            std::env::current_dir()?,
+            name.clone(),
+            SessionType::User,
+            gosling_mode,
+        )
+        .await?;
+
+    if has_user_provided_name {
+        session_manager
+            .update(&session.id)
+            .user_provided_name(name)
+            .apply()
+            .await?;
+    }
+
+    Ok(Some(session.id))
+}
+
+/// Resolve `identifier` to a session ID, or prompt the user to pick one
+/// interactively when no identifier was given. Returns `Ok(None)` when the
+/// interactive prompt fails, having already reported the error — callers
+/// should treat that as "already handled" and return without further action.
+async fn resolve_or_prompt_session_id(
+    session_manager: &SessionManager,
+    identifier: Option<Identifier>,
+) -> Result<Option<String>> {
+    let Some(id) = identifier else {
+        return match crate::commands::session::prompt_interactive_session_selection(session_manager)
+            .await
+        {
+            Ok(id) => Ok(Some(id)),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                Ok(None)
+            }
+        };
+    };
+    Ok(Some(lookup_session_id(id).await?))
 }
 
 async fn lookup_session_id(identifier: Identifier) -> Result<String> {
@@ -1264,13 +1265,6 @@ enum TermCommand {
     Info,
 }
 
-#[derive(clap::ValueEnum, Clone, Debug)]
-enum CliProviderVariant {
-    OpenAi,
-    Databricks,
-    Ollama,
-}
-
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 enum CompletionShell {
     Bash,
@@ -1728,20 +1722,10 @@ async fn handle_session_subcommand(command: SessionCommand) -> Result<()> {
             relays,
         } => {
             let session_manager = SessionManager::instance();
-            let session_identifier = if let Some(id) = identifier {
-                lookup_session_id(id).await?
-            } else {
-                match crate::commands::session::prompt_interactive_session_selection(
-                    &session_manager,
-                )
-                .await
-                {
-                    Ok(id) => id,
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        return Ok(());
-                    }
-                }
+            let Some(session_identifier) =
+                resolve_or_prompt_session_id(&session_manager, identifier).await?
+            else {
+                return Ok(());
             };
             crate::commands::session::handle_session_export(
                 session_identifier,
@@ -1761,20 +1745,10 @@ async fn handle_session_subcommand(command: SessionCommand) -> Result<()> {
         }
         SessionCommand::Diagnostics { identifier, output } => {
             let session_manager = SessionManager::instance();
-            let session_id = if let Some(id) = identifier {
-                lookup_session_id(id).await?
-            } else {
-                match crate::commands::session::prompt_interactive_session_selection(
-                    &session_manager,
-                )
-                .await
-                {
-                    Ok(id) => id,
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                        return Ok(());
-                    }
-                }
+            let Some(session_id) =
+                resolve_or_prompt_session_id(&session_manager, identifier).await?
+            else {
+                return Ok(());
             };
             crate::commands::session::handle_diagnostics(&session_id, output).await?;
         }

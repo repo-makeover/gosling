@@ -26,10 +26,7 @@ use super::retry::ProviderRetry;
 use crate::config::ConfigError;
 use crate::conversation::message::Message;
 use crate::instance_id::get_instance_id;
-use crate::providers::retry::{
-    RetryConfig, DEFAULT_BACKOFF_MULTIPLIER, DEFAULT_INITIAL_RETRY_INTERVAL_MS,
-    DEFAULT_MAX_RETRIES, DEFAULT_MAX_RETRY_INTERVAL_MS,
-};
+use crate::providers::retry::RetryConfig;
 use gosling_providers::errors::ProviderError;
 use gosling_providers::formats::openai_responses::create_responses_request;
 use gosling_providers::model::ModelConfig;
@@ -153,36 +150,7 @@ impl DatabricksProvider {
     }
 
     fn load_retry_config(config: &crate::config::Config) -> RetryConfig {
-        let max_retries = config
-            .get_param("DATABRICKS_MAX_RETRIES")
-            .ok()
-            .and_then(|v: String| v.parse::<usize>().ok())
-            .unwrap_or(DEFAULT_MAX_RETRIES);
-
-        let initial_interval_ms = config
-            .get_param("DATABRICKS_INITIAL_RETRY_INTERVAL_MS")
-            .ok()
-            .and_then(|v: String| v.parse::<u64>().ok())
-            .unwrap_or(DEFAULT_INITIAL_RETRY_INTERVAL_MS);
-
-        let backoff_multiplier = config
-            .get_param("DATABRICKS_BACKOFF_MULTIPLIER")
-            .ok()
-            .and_then(|v: String| v.parse::<f64>().ok())
-            .unwrap_or(DEFAULT_BACKOFF_MULTIPLIER);
-
-        let max_interval_ms = config
-            .get_param("DATABRICKS_MAX_RETRY_INTERVAL_MS")
-            .ok()
-            .and_then(|v: String| v.parse::<u64>().ok())
-            .unwrap_or(DEFAULT_MAX_RETRY_INTERVAL_MS);
-
-        RetryConfig::new(
-            max_retries,
-            initial_interval_ms,
-            backoff_multiplier,
-            max_interval_ms,
-        )
+        crate::providers::load_retry_config_from_env(config, "DATABRICKS", RetryConfig::default())
     }
 
     fn resolve_instance_id() -> Option<String> {
@@ -196,12 +164,8 @@ impl DatabricksProvider {
         }
     }
 
-    fn is_claude_model(model_name: &str) -> bool {
-        model_name.to_lowercase().contains("claude")
-    }
-
     fn is_reasoning_capable_model_name(model_name: &str) -> bool {
-        Self::is_claude_model(model_name) || is_openai_responses_model(model_name)
+        crate::providers::is_claude_model(model_name) || is_openai_responses_model(model_name)
     }
 
     fn uses_responses_api(
@@ -620,8 +584,8 @@ impl Provider for DatabricksProvider {
             stream_responses_compat(response, log)
         } else {
             let format_model_config;
-            let request_model_config = if Self::is_claude_model(effective_model_name)
-                && !Self::is_claude_model(&model_config.model_name)
+            let request_model_config = if crate::providers::is_claude_model(effective_model_name)
+                && !crate::providers::is_claude_model(&model_config.model_name)
             {
                 format_model_config = {
                     let mut config = model_config.clone();

@@ -35,10 +35,6 @@ pub fn plugin_install_dir() -> PathBuf {
     Paths::plugins_dir()
 }
 
-pub fn project_plugin_install_dir(project_root: &Path) -> PathBuf {
-    project_root.join(".agents").join("plugins")
-}
-
 #[derive(Debug, Clone)]
 pub struct PluginInstall {
     pub name: String,
@@ -115,10 +111,6 @@ pub fn installed_plugin_skill_dirs() -> Vec<PathBuf> {
         .collect()
 }
 
-pub fn install_plugin(source: &str) -> Result<PluginInstall> {
-    install_plugin_with_options(source, PluginInstallOptions::default())
-}
-
 pub fn install_plugin_with_options(
     source: &str,
     options: PluginInstallOptions,
@@ -150,10 +142,6 @@ fn install_plugin_with_options_at_root(
 
 pub fn update_plugin(name: &str) -> Result<PluginInstall> {
     update_plugin_at_root(Utc::now(), &plugin_install_dir(), name)
-}
-
-pub fn auto_update_plugins() -> Vec<PluginAutoUpdateResult> {
-    auto_update_plugins_at_root(Utc::now(), &plugin_install_dir())
 }
 
 fn auto_update_plugins_at_root(
@@ -456,6 +444,36 @@ pub(in crate::plugins) fn validated_skill_name(raw: &str, skill_file: &Path) -> 
         );
     }
     Ok(name)
+}
+
+#[derive(Debug)]
+pub(in crate::plugins) struct SkillCandidate {
+    pub(in crate::plugins) name: String,
+    pub(in crate::plugins) relative_directory: PathBuf,
+}
+
+/// Record `skill_dir` as a skill candidate if it contains a `SKILL.md`, relative to
+/// `plugin_dir`. A no-op (not an error) when `skill_dir` has no `SKILL.md`.
+pub(in crate::plugins) fn collect_skill_candidate(
+    plugin_dir: &Path,
+    skill_dir: &Path,
+    skills: &mut Vec<SkillCandidate>,
+) -> Result<()> {
+    let skill_file = skill_dir.join("SKILL.md");
+    if !skill_file.is_file() {
+        return Ok(());
+    }
+
+    let raw = fs::read_to_string(&skill_file)?;
+    let name = validated_skill_name(&raw, &skill_file)?;
+    let relative_directory = skill_dir.strip_prefix(plugin_dir)?.to_path_buf();
+
+    skills.push(SkillCandidate {
+        name,
+        relative_directory,
+    });
+
+    Ok(())
 }
 
 #[cfg(test)]

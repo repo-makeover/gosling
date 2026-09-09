@@ -41,7 +41,7 @@ sudo dnf install dpkg-dev fakeroot
 
 # Building notes
 
-This is an electron forge app, using vite and react.js. `goslingd` runs as multi process binaries on each window/tab similar to chrome.
+This is an electron forge app, using vite and react.js. The `gosling` backend (`gosling serve`) runs as multi process binaries on each window/tab similar to chrome.
 
 ## Localization catalogs
 
@@ -71,18 +71,18 @@ This allows you to set for example GOSLING_PROVIDER\_\_TYPE to be "databricks" b
 
 For Linux builds, first ensure you have the required system dependencies installed (see above), then:
 
-1. Build the Rust backend:
+1. Build the Rust CLI binary:
 
 ```bash
 cd ../..  # Go to project root
-cargo build --release -p gosling-server
+cargo build --release -p gosling-cli --bin gosling
 ```
 
-2. Copy the server binary to the expected location:
+2. Copy the binary to the expected location:
 
 ```bash
 mkdir -p src/bin
-cp ../../target/release/goslingd src/bin/
+cp ../../target/release/gosling src/bin/
 ```
 
 3. Build the application:
@@ -108,10 +108,3 @@ The built application will be available in:
 ### Windows
 
 Use the existing Windows build process as documented.
-
-# Running with goslingd server from source
-
-Set `VITE_START_EMBEDDED_SERVER=yes` to no in `.env`.
-Run `cargo run -p gosling-server` from parent dir.
-`pnpm run start` will then run against this.
-You can try server directly with `./test.sh`

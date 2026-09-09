@@ -2,7 +2,7 @@
 // Extracted from `summon.rs` in a behavior-preserving modularization.
 // The `summon` compatibility facade exposes this behavior through MCP delegation only.
 
-use super::delegate_config::{delegate_mode, delegate_mode_notice};
+use super::delegate_config::{delegate_mode_notice, PreparedDelegate};
 use super::*;
 
 impl SummonClient {
@@ -20,52 +20,18 @@ impl SummonClient {
             .await
             .map_err(|e| format!("Failed to get session: {}", e))?;
 
-        let working_dir = session.working_dir.clone();
-        let spec = self.build_delegate_spec(&params, &working_dir).await?;
-
-        let task_config = self
-            .build_task_config(&params, &spec, &session)
-            .await
-            .map_err(|e| format!("Failed to build task config: {}", e))?;
-        let authority_summary = delegate_authority_summary(&task_config.extensions);
-        let subagent_mode = delegate_mode(task_config.provider.executes_tools_outside_gosling());
-
         let description = safe_truncate(&Self::get_task_description(&params), TASK_LABEL_BUDGET);
 
-        // Hosted-tool subagents use Auto because no UI is attached to answer
-        // approval prompts. External-tool providers cannot safely use Auto;
-        // Chat mode keeps those providers available for bounded text work while
-        // rejecting their delegated tool calls at the ACP boundary.
-        let agent_config = AgentConfig::new(
-            self.context.session_manager.clone(),
-            crate::config::permission::PermissionManager::instance(),
+        let PreparedDelegate {
+            spec,
+            task_config,
             subagent_mode,
-            true, // disable session naming for subagents
-            crate::agents::GoslingPlatform::GoslingCli,
-        )
-        .with_code_execution_runtime(self.context.code_execution_runtime)
-        .with_use_login_shell_path(self.context.use_login_shell_path);
-
-        let subagent_session = self
-            .context
-            .session_manager
-            .create_session(
-                task_config.parent_working_dir.clone(),
-                description.clone(),
-                SessionType::SubAgent,
-                subagent_mode,
-            )
-            .await
-            .map_err(|e| format!("Failed to create subagent session: {}", e))?;
-        self.context
-            .session_manager
-            .merge_extension_state(
-                &subagent_session.id,
-                "output_agent.v1",
-                serde_json::json!({ "name": params.source, "parentSessionId": session_id }),
-            )
-            .await
-            .map_err(|e| format!("Failed to record subagent identity: {e}"))?;
+            agent_config,
+            subagent_session,
+        } = self
+            .prepare_delegate(session_id, &params, &session, description.clone())
+            .await?;
+        let authority_summary = delegate_authority_summary(&task_config.extensions);
 
         let task_id = subagent_session.id.clone();
 

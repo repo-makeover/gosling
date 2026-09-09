@@ -543,27 +543,25 @@ These variables configure the [Langfuse integration for observability](/docs/tut
 
 ## gosling Server
 
-These variables configure the local `goslingd` server process. They are most often used when [running `goslingd` as a separate local process](/docs/guides/remote-gosling-server) and connecting gosling Desktop to it.
+These variables configure the local `gosling serve` process (the standalone `goslingd` binary this section used to describe has been retired). They are most often used when [running the server as a separate local process](/docs/guides/remote-gosling-server) and connecting gosling Desktop to it — see that page for the current setup steps and its notes on which of the details below are still unverified.
 
 | Variable | Purpose | Values | Default |
 |----------|---------|---------|---------|
-| `GOSLING_HOST` | Numeric loopback interface. `127.0.0.1` and `::1` are supported; wildcard and non-loopback addresses are rejected. | Loopback IP | `127.0.0.1` |
-| `GOSLING_PORT` | TCP port the server listens on | Port number | `3000` |
 | `GOSLING_TLS` | Enable TLS with a self-signed certificate. | `true`, `false` | `true` |
-| `GOSLING_SERVER__SECRET_KEY` | Shared secret required in the `X-Secret-Key` header on all client requests. `goslingd` auto-generates one when unset; `gosling serve` requires this variable unless started with `--dangerously-unauthenticated`. | Secret string | Random for `goslingd`; required for `gosling serve` |
+| `GOSLING_SERVER__SECRET_KEY` | Shared secret required in the `X-Secret-Key` header on all client requests. `gosling serve` requires this variable unless started with `--dangerously-unauthenticated`. | Secret string | Required unless `--dangerously-unauthenticated` |
+
+Host and port are set with `gosling serve`'s `--host`/`--port` flags (defaults `127.0.0.1` / `3284`), not environment variables.
 
 **Examples**
 
 ```bash
-# Start a separately managed local goslingd server over TLS
-export GOSLING_HOST=127.0.0.1
-export GOSLING_PORT=3000
+# Start a separately managed local gosling server over TLS
 export GOSLING_TLS=true
 export GOSLING_SERVER__SECRET_KEY='a-long-random-secret'
-goslingd agent
+gosling serve --host 127.0.0.1 --port 3000
 ```
 
-When TLS is enabled, `goslingd` prints a `GOSLINGD_CERT_FINGERPRINT=...` line on startup. Desktop needs this fingerprint to verify the self-signed certificate. See [Running a Separate Local gosling Server](/docs/guides/remote-gosling-server) for the full setup.
+See [Running a Separate Local gosling Server](/docs/guides/remote-gosling-server) for the full setup, including what's unverified about the certificate-fingerprint step.
 
 ## Development & Testing
 

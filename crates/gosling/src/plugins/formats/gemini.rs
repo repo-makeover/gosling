@@ -1,12 +1,12 @@
 use crate::plugins::{
-    copy_dir_all, validated_skill_name, write_install_metadata, FormatNotSupported, ImportedSkill,
-    PluginFormat, PluginInstall, PluginInstallOptions,
+    collect_skill_candidate, copy_dir_all, write_install_metadata, FormatNotSupported,
+    ImportedSkill, PluginFormat, PluginInstall, PluginInstallOptions, SkillCandidate,
 };
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use fs_err as fs;
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(in crate::plugins) const MANIFEST: &str = "gemini-extension.json";
 
@@ -14,11 +14,6 @@ pub(in crate::plugins) const MANIFEST: &str = "gemini-extension.json";
 struct GeminiManifest {
     name: String,
     version: String,
-}
-
-struct SkillCandidate {
-    name: String,
-    relative_directory: PathBuf,
 }
 
 pub(in crate::plugins) fn try_install_from_manifest_at_root(
@@ -118,28 +113,6 @@ fn find_skills(extension_dir: &Path) -> Result<Vec<SkillCandidate>> {
 
     skills.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(skills)
-}
-
-fn collect_skill_candidate(
-    extension_dir: &Path,
-    skill_dir: &Path,
-    skills: &mut Vec<SkillCandidate>,
-) -> Result<()> {
-    let skill_file = skill_dir.join("SKILL.md");
-    if !skill_file.is_file() {
-        return Ok(());
-    }
-
-    let raw = fs::read_to_string(&skill_file)?;
-    let name = validated_skill_name(&raw, &skill_file)?;
-    let relative_directory = skill_dir.strip_prefix(extension_dir)?.to_path_buf();
-
-    skills.push(SkillCandidate {
-        name,
-        relative_directory,
-    });
-
-    Ok(())
 }
 
 #[cfg(test)]

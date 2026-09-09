@@ -200,27 +200,15 @@ impl BedrockProvider {
     }
 
     fn load_retry_config(config: &crate::config::Config) -> RetryConfig {
-        let max_retries = config
-            .get_param::<usize>("BEDROCK_MAX_RETRIES")
-            .unwrap_or(BEDROCK_DEFAULT_MAX_RETRIES);
-
-        let initial_interval_ms = config
-            .get_param::<u64>("BEDROCK_INITIAL_RETRY_INTERVAL_MS")
-            .unwrap_or(BEDROCK_DEFAULT_INITIAL_RETRY_INTERVAL_MS);
-
-        let backoff_multiplier = config
-            .get_param::<f64>("BEDROCK_BACKOFF_MULTIPLIER")
-            .unwrap_or(BEDROCK_DEFAULT_BACKOFF_MULTIPLIER);
-
-        let max_interval_ms = config
-            .get_param::<u64>("BEDROCK_MAX_RETRY_INTERVAL_MS")
-            .unwrap_or(BEDROCK_DEFAULT_MAX_RETRY_INTERVAL_MS);
-
-        RetryConfig::new(
-            max_retries,
-            initial_interval_ms,
-            backoff_multiplier,
-            max_interval_ms,
+        crate::providers::load_retry_config_from_env(
+            config,
+            "BEDROCK",
+            RetryConfig::new(
+                BEDROCK_DEFAULT_MAX_RETRIES,
+                BEDROCK_DEFAULT_INITIAL_RETRY_INTERVAL_MS,
+                BEDROCK_DEFAULT_BACKOFF_MULTIPLIER,
+                BEDROCK_DEFAULT_MAX_RETRY_INTERVAL_MS,
+            ),
         )
     }
 

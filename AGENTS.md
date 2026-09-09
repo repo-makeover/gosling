@@ -48,7 +48,6 @@ crates/
 ├── gosling-providers    # model/provider adapters
 ├── gosling-sdk          # Rust SDK
 ├── gosling-sdk-types    # shared ACP/SDK types
-├── gosling-server       # ACP/HTTP server host
 ├── gosling-test         # test utilities
 └── gosling-test-support # test helpers
 

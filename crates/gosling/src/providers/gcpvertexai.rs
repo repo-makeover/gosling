@@ -189,37 +189,18 @@ impl GcpVertexAIProvider {
     }
 
     /// Loads retry configuration from environment variables or uses defaults.
+    // 429 rate-limit errors are common enough on Vertex to warrant more, and
+    // more patient, retries than the workspace-wide defaults.
     fn load_retry_config(config: &crate::config::Config) -> RetryConfig {
-        // Load max retries for 429 rate limit errors
-        let max_retries = config
-            .get_param("GCP_MAX_RETRIES")
-            .ok()
-            .and_then(|v: String| v.parse::<usize>().ok())
-            .unwrap_or(DEFAULT_MAX_RETRIES);
-
-        let initial_interval_ms = config
-            .get_param("GCP_INITIAL_RETRY_INTERVAL_MS")
-            .ok()
-            .and_then(|v: String| v.parse::<u64>().ok())
-            .unwrap_or(DEFAULT_INITIAL_RETRY_INTERVAL_MS);
-
-        let backoff_multiplier = config
-            .get_param("GCP_BACKOFF_MULTIPLIER")
-            .ok()
-            .and_then(|v: String| v.parse::<f64>().ok())
-            .unwrap_or(DEFAULT_BACKOFF_MULTIPLIER);
-
-        let max_interval_ms = config
-            .get_param("GCP_MAX_RETRY_INTERVAL_MS")
-            .ok()
-            .and_then(|v: String| v.parse::<u64>().ok())
-            .unwrap_or(DEFAULT_MAX_RETRY_INTERVAL_MS);
-
-        RetryConfig::new(
-            max_retries,
-            initial_interval_ms,
-            backoff_multiplier,
-            max_interval_ms,
+        crate::providers::load_retry_config_from_env(
+            config,
+            "GCP",
+            RetryConfig::new(
+                DEFAULT_MAX_RETRIES,
+                DEFAULT_INITIAL_RETRY_INTERVAL_MS,
+                DEFAULT_BACKOFF_MULTIPLIER,
+                DEFAULT_MAX_RETRY_INTERVAL_MS,
+            ),
         )
     }
 

@@ -32,7 +32,7 @@ When reporting a desktop startup failure, share:
 - your gosling version
 - your operating system and version
 
-For Windows native crashes, also attach the Windows crash report for `goslingd.exe` if available.
+For Windows native crashes, also attach the Windows crash report for `gosling.exe` if available.
 
 Common places to find the Windows crash report:
 
@@ -42,14 +42,14 @@ Common places to find the Windows crash report:
   - `%LOCALAPPDATA%\Microsoft\Windows\WER\ReportArchive\`
   - `%LOCALAPPDATA%\Microsoft\Windows\WER\ReportQueue\`
 
-Look for a `Report.wer` related to `goslingd.exe`.
+Look for a `Report.wer` related to `gosling.exe`.
 
 If you are filing a GitHub issue or asking for support, this is usually enough:
 
 - the newest `gosling-serve-startup-*.json`
 - your gosling version
 - your operating system and version
-- on Windows, `Report.wer` for `goslingd.exe` if Windows created one
+- on Windows, `Report.wer` for `gosling.exe` if Windows created one
 
 ## What The Startup Log Contains
 

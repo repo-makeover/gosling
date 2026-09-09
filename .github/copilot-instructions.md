@@ -40,7 +40,7 @@
 ## Project-Specific Context
 
 - This is a Rust project using cargo workspaces
-- Core crates: `gosling` (agent logic), `gosling-cli` (CLI), `gosling-server` (backend), `gosling-mcp` (MCP servers)
+- Core crates: `gosling` (agent logic), `gosling-cli` (CLI), `gosling-mcp` (MCP servers)
 - Error handling: Use `anyhow::Result`, not `unwrap()` in production code
 - Async runtime: tokio
 - MCP protocol implementations require extra scrutiny

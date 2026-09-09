@@ -1,5 +1,6 @@
 use tokio_util::sync::CancellationToken;
-use unicode_normalization::UnicodeNormalization;
+
+pub use gosling_providers::utils::sanitize_unicode_tags;
 
 /// Encode bytes as a lowercase hexadecimal string.
 ///
@@ -18,25 +19,13 @@ pub fn bytes_to_hex(bytes: impl AsRef<[u8]>) -> String {
     output
 }
 
-fn is_hidden_prompt_control(c: char) -> bool {
-    matches!(
-        c,
-        '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{E0000}'..='\u{E007F}'
-    )
-}
-
 pub fn contains_unicode_tags(text: &str) -> bool {
-    text.chars().any(is_hidden_prompt_control)
-}
-
-/// Sanitize invisible prompt-control characters from text.
-pub fn sanitize_unicode_tags(text: &str) -> String {
-    let normalized: String = text.nfc().collect();
-
-    normalized
-        .chars()
-        .filter(|&c| !is_hidden_prompt_control(c))
-        .collect()
+    text.chars().any(|c| {
+        matches!(
+            c,
+            '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{E0000}'..='\u{E007F}'
+        )
+    })
 }
 
 /// Safely truncate a string at character boundaries, not byte boundaries
