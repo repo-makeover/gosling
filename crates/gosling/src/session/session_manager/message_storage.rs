@@ -19,6 +19,7 @@ use super::{
 use crate::conversation::message::{Message, MessageContent};
 use crate::conversation::Conversation;
 use anyhow::Result;
+use gosling_providers::conversation::token_usage::Usage;
 use rmcp::model::Role;
 use sqlx::{Pool, Sqlite};
 use std::collections::HashSet;
@@ -526,6 +527,36 @@ impl SessionStorage {
         let _write_guard = self.acquire_write_guard().await;
         let pool = self.pool().await?;
         Self::replace_conversation_inner(pool, session_id, conversation).await
+    }
+
+    /// Like `replace_conversation`, but also applies a `sessions` usage
+    /// update in the same transaction. Compaction call sites use this
+    /// instead of a separate `replace_conversation` + `record_usage` pair so
+    /// a crash between the two can't leave the messages table already
+    /// reflecting the compacted conversation while `sessions.total_tokens`
+    /// still reflects the pre-compaction one (see `record_usage_in_tx`).
+    pub async fn replace_conversation_and_record_usage(
+        &self,
+        session_id: &str,
+        conversation: &Conversation,
+        current_usage: Usage,
+        accumulated_delta: Usage,
+        cost_delta: Option<f64>,
+    ) -> Result<()> {
+        let _write_guard = self.acquire_write_guard().await;
+        let pool = self.pool().await?;
+        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+        Self::replace_conversation_in_tx(&mut tx, session_id, conversation).await?;
+        Self::record_usage_in_tx(
+            &mut tx,
+            session_id,
+            current_usage,
+            accumulated_delta,
+            cost_delta,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub(super) async fn truncate_conversation(

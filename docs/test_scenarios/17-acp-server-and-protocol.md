@@ -69,6 +69,7 @@ shared secret in reports.
 - Steps: cancel before first token, mid-stream, during tool wait, after completion, and twice with the same request ID; send a clean follow-up.
 - Expected: active cases produce one terminal cancelled state within 10 seconds; no post-cancel side effect crosses its checkpoint; late/duplicate cancel is idempotent or a defined error; follow-up succeeds.
 - Observe: cancellation propagation to child processes and approval prompts.
+- Variations: revoke the turn's lease independently of the client's own cancel call (e.g. a second client taking over the session) and confirm the reported terminal state names lease loss distinctly from a caller-initiated cancellation, per `ensure_turn_not_revoked`; also confirm compaction in flight when cancellation arrives does not save a replacement summary over the intact prior history.
 
 ### AP-09 — Server termination during an active request
 - Goal: clients and persisted sessions recover honestly after graceful and abrupt server loss.

@@ -373,7 +373,8 @@ export function registerFileIpcHandlers(
         if (
           total !== stats.size ||
           current.size !== stats.size ||
-          current.mtimeMs !== stats.mtimeMs
+          current.mtimeMs !== stats.mtimeMs ||
+          current.ctimeMs !== stats.ctimeMs
         ) {
           throw new Error('The file changed while copying. Try again.');
         }

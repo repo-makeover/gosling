@@ -1376,6 +1376,66 @@ async fn canceled_manual_compaction_does_not_replace_history() -> Result<()> {
     Ok(())
 }
 
+/// NEG-CROSS-001 regression: an invalid `GOSLING_AUTO_COMPACT_THRESHOLD` on the
+/// process environment (a typo like "5" instead of "0.5") must not turn every
+/// subsequent `reply()` call into a hard failure. `check_if_compaction_needed`
+/// must degrade to "auto-compaction disabled" rather than propagating
+/// `validate_compaction_settings`'s error out of `reply()`'s setup path.
+#[tokio::test]
+#[serial]
+async fn reply_succeeds_when_auto_compact_threshold_env_is_invalid() -> Result<()> {
+    let _threshold = env_lock::lock_env([("GOSLING_AUTO_COMPACT_THRESHOLD", Some("5"))]);
+    let temp_dir = TempDir::new()?;
+    let agent = Agent::new();
+
+    let messages = vec![
+        Message::user().with_text("Hello"),
+        Message::assistant().with_text("Hi there"),
+    ];
+    let session = setup_test_session(&agent, &temp_dir, "invalid-threshold-test", messages).await?;
+
+    let provider = Arc::new(MockCompactionProvider::new());
+    agent
+        .update_provider(provider, ModelConfig::new("mock-model"), &session.id)
+        .await?;
+
+    let session_config = SessionConfig {
+        id: session.id.clone(),
+        max_turns: None,
+        compacted_context: false,
+        tail_limit: None,
+    };
+
+    let reply_stream = agent
+        .reply(
+            Message::user().with_text("Tell me more"),
+            session_config,
+            None,
+        )
+        .await?;
+    tokio::pin!(reply_stream);
+
+    let mut got_response = false;
+    while let Some(event_result) = reply_stream.next().await {
+        if let AgentEvent::Message(msg) = event_result? {
+            if msg
+                .content
+                .iter()
+                .any(|c| matches!(c, MessageContent::Text(_)))
+            {
+                got_response = true;
+            }
+        }
+    }
+
+    assert!(
+        got_response,
+        "reply() must still succeed with an invalid auto-compact threshold, not error out"
+    );
+
+    Ok(())
+}
+
 #[tokio::test]
 #[serial]
 async fn failed_compaction_publishes_terminal_error_for_manual_and_automatic_paths() -> Result<()> {

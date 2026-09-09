@@ -6,7 +6,7 @@ export const NAV_DIMENSIONS = {
 export const Z_INDEX = {
   /** Header controls (menu button, etc.) */
   HEADER: 100,
-  /** Tooltips - should appear above most UI elements */
+  /** Unused: tooltip content actually stacks at DROPDOWN_ABOVE_OVERLAY. Kept only for any future consumer that needs a value between HEADER and POPOVER. */
   TOOLTIP: 200,
   /** Popover content (hover menus) */
   POPOVER: 9999,

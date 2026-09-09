@@ -867,6 +867,27 @@ impl SessionManager {
         self.storage.replace_conversation(id, conversation).await
     }
 
+    /// Atomic pairing of `replace_conversation` and `record_usage`, for
+    /// compaction call sites that must not let the two commit separately.
+    pub async fn replace_conversation_and_record_usage(
+        &self,
+        id: &str,
+        conversation: &Conversation,
+        current_usage: Usage,
+        accumulated_delta: Usage,
+        cost_delta: Option<f64>,
+    ) -> Result<()> {
+        self.storage
+            .replace_conversation_and_record_usage(
+                id,
+                conversation,
+                current_usage,
+                accumulated_delta,
+                cost_delta,
+            )
+            .await
+    }
+
     pub async fn list_sessions(&self) -> Result<Vec<Session>> {
         self.storage.list_sessions().await
     }
@@ -4746,6 +4767,92 @@ mod tests {
             Usage::new(Some(30), Some(15), None).with_cache_tokens(Some(2), Some(3))
         );
         assert_eq!(reloaded.accumulated_cost, Some(1.0));
+    }
+
+    // FSR-CROSS-001: compaction used to call `replace_conversation` and
+    // `record_usage` as two separately-committed writes; a crash between the
+    // two could leave `sessions.total_tokens` stale-high relative to the
+    // already-compacted conversation, spuriously re-triggering auto-compaction
+    // on the next turn. `replace_conversation_and_record_usage` commits both
+    // in one transaction; this asserts both effects are observable together
+    // after a single successful call, and that a failing call leaves neither
+    // applied (not a torn state where messages replaced but usage stale).
+    #[tokio::test]
+    async fn replace_conversation_and_record_usage_applies_both_writes_together() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = SessionManager::new(temp_dir.path().to_path_buf());
+        let session = manager
+            .create_session(
+                PathBuf::from("/tmp/test"),
+                "Atomic compaction write".to_string(),
+                SessionType::User,
+                GoslingMode::default(),
+            )
+            .await
+            .unwrap();
+
+        let original = Conversation::new_unvalidated(vec![
+            Message::user().with_text("original 1"),
+            Message::assistant().with_text("original 2"),
+        ]);
+        manager
+            .replace_conversation(&session.id, &original)
+            .await
+            .unwrap();
+        manager
+            .record_usage(
+                &session.id,
+                Usage::new(Some(9_900), Some(100), Some(10_000)),
+                Usage::new(Some(9_900), Some(100), Some(10_000)),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let compacted =
+            Conversation::new_unvalidated(vec![Message::assistant().with_text("<summary>")]);
+        let current_usage = Usage::new(Some(200), None, Some(200));
+        manager
+            .replace_conversation_and_record_usage(
+                &session.id,
+                &compacted,
+                current_usage,
+                Usage::new(Some(6_000), Some(200), Some(6_200)),
+                Some(0.5),
+            )
+            .await
+            .unwrap();
+
+        let reloaded = manager.get_session(&session.id, true).await.unwrap();
+        let stored_conversation = reloaded.conversation.expect("conversation should load");
+        assert_eq!(stored_conversation.messages().len(), 1);
+        assert_eq!(
+            stored_conversation.messages()[0].as_concat_text(),
+            "<summary>"
+        );
+        assert_eq!(reloaded.usage, current_usage);
+        assert_eq!(reloaded.accumulated_usage.total_tokens, Some(16_200));
+        assert_eq!(reloaded.accumulated_cost, Some(0.5));
+
+        // A failing call (nonexistent session) must not leave a torn state:
+        // no messages committed for an id `sessions` never accepted.
+        let orphan_id = "does-not-exist";
+        let err = manager
+            .replace_conversation_and_record_usage(
+                orphan_id,
+                &compacted,
+                current_usage,
+                Usage::default(),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(!err.to_string().is_empty());
+        let orphan_messages = manager.storage().get_conversation(orphan_id).await.unwrap();
+        assert!(
+            orphan_messages.messages().is_empty(),
+            "a rolled-back write must not leave stray messages for a session that was never created"
+        );
     }
 
     #[tokio::test]

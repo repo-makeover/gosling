@@ -1,6 +1,8 @@
 import React from 'react';
 import ReactSelect from 'react-select';
 
+import { Z_INDEX } from '../Layout/constants';
+
 export const Select = (props: React.ComponentProps<typeof ReactSelect>) => {
   const customClassNames = props.classNames ?? {};
   const customStyles = props.styles ?? {};
@@ -45,7 +47,7 @@ export const Select = (props: React.ComponentProps<typeof ReactSelect>) => {
         menu: (base) => ({
           ...base,
           pointerEvents: 'auto',
-          zIndex: 9999,
+          zIndex: Z_INDEX.POPOVER,
         }),
         menuList: (base) => ({
           ...base,

@@ -612,6 +612,40 @@ impl Agent {
         Ok(())
     }
 
+    /// Compaction's equivalent of calling `session_manager.replace_conversation`
+    /// followed by `update_session_metrics(.., is_compaction_usage: true)`, but
+    /// atomic: both writes commit or roll back together (see
+    /// `SessionManager::replace_conversation_and_record_usage`).
+    pub(crate) async fn replace_conversation_and_update_metrics(
+        &self,
+        session_id: &str,
+        conversation: &Conversation,
+        usage: &ProviderUsage,
+    ) -> Result<()> {
+        let manager = self.config.session_manager.clone();
+        let session = manager.get_session(session_id, false).await?;
+        let cost_delta = session
+            .provider_name
+            .as_deref()
+            .and_then(|pn| self.estimate_usage_cost(usage, pn));
+
+        // Compaction usage always maps its output tokens to the new input
+        // context (same mapping as `update_session_metrics`'s
+        // `is_compaction_usage: true` branch).
+        let new_input = usage.usage.output_tokens;
+        let current_usage = Usage::new(new_input, None, new_input);
+
+        manager
+            .replace_conversation_and_record_usage(
+                session_id,
+                conversation,
+                current_usage,
+                usage.usage,
+                cost_delta,
+            )
+            .await
+    }
+
     fn estimate_usage_cost(&self, usage: &ProviderUsage, provider_name: &str) -> Option<f64> {
         let canonical =
             crate::providers::canonical::maybe_get_canonical_model(provider_name, &usage.model)?;

@@ -155,7 +155,7 @@ technical help) · **Medium** (secondary workflow fails, unclear errors,
 stuck UI, non-persisting settings) · **Low** (confusing label, glitch,
 awkward navigation) · **Note** (observation or product question).
 
-## Files (119 scenarios)
+## Files (127 scenarios)
 
 | File | Surface | Cards | Core question |
 |---|---|---|---|
@@ -172,9 +172,9 @@ awkward navigation) · **Note** (observation or product question).
 | [`11-headless-serve-acp.md`](11-headless-serve-acp.md) | `run`, `serve`, `acp` | HS-01–03 | Do non-interactive and server surfaces stay coherent? |
 | [`12-stress-and-adversarial.md`](12-stress-and-adversarial.md) | load, races, recovery under pain | SX-01–09 | Does gosling stay coherent when the operator is impatient? |
 | [`13-advanced-cli-and-sessions.md`](13-advanced-cli-and-sessions.md) | resume, fork, edit, diagnostics, term, TUI, review | AC-01–10 | Are advanced CLI workflows deterministic and scriptable? |
-| [`14-desktop-ux-and-integration.md`](14-desktop-ux-and-integration.md) | onboarding, windows, keyboard, artifacts, backend | DT-01–10 | Does Desktop behave like a durable native application? |
+| [`14-desktop-ux-and-integration.md`](14-desktop-ux-and-integration.md) | onboarding, windows, keyboard, artifacts, backend | DT-01–16 | Does Desktop behave like a durable native application? |
 | [`15-context-and-filesystem.md`](15-context-and-filesystem.md) | hints, instructions, roots, stdin, runtime gates | CX-01–10 | Is context scoped, explainable, and isolated? |
-| [`16-provider-and-network-resilience.md`](16-provider-and-network-resilience.md) | limits, disconnects, OAuth, metadata, cost | PN-01–10 | Do provider failures recover without lying or losing state? |
+| [`16-provider-and-network-resilience.md`](16-provider-and-network-resilience.md) | limits, disconnects, OAuth, metadata, cost | PN-01–12 | Do provider failures recover without lying or losing state? |
 | [`17-acp-server-and-protocol.md`](17-acp-server-and-protocol.md) | auth, origins, TLS, framing, cancellation | AP-01–10 | Are ACP transports secure, bounded, and interoperable? |
 | [`18-state-extension-and-permission-depth.md`](18-state-extension-and-permission-depth.md) | state integrity, migrations, MCP, plugins, approvals | SI-01–10 | Do cross-cutting state and safety boundaries hold under change? |
 | [`19-deep-research.md`](19-deep-research.md) | zero-input research, reports, delegate fail-fast | DR-01–02 | Does Deep Research respect an empty Initial Inputs boundary and stop invalid delegation churn? |
@@ -189,7 +189,7 @@ awkward navigation) · **Note** (observation or product question).
 | Resilience | 04, 07, 11 | Model honesty, session portability, headless/serve |
 | Deep Research | 19 → 20 | Prompt-only scope, report routing, and known-failure regression replay |
 | Stress | 12 (after green smoke) | Concurrency, bloat, restart-under-load, env seams |
-| Full library | 01 → 20 numeric order | Release or major-regression playtest (**119 cards**) |
+| Full library | 01 → 20 numeric order | Release or major-regression playtest (**127 cards**) |
 
 ## Required coverage checklist
 
@@ -221,7 +221,7 @@ scenario (or an explicit not-applicable/blocked note):
 - [ ] Server authentication, Origin validation, TLS, and protocol framing
 - [ ] Config/session migration from a previous supported release
 
-## Scenario index (112)
+## Scenario index (127)
 
 | ID | File | Name |
 |---|---|---|
@@ -295,6 +295,12 @@ scenario (or an explicit not-applicable/blocked note):
 | DT-08 | 14 | Archive and restore session lifecycle |
 | DT-09 | 14 | External backend authentication and reconnect |
 | DT-10 | 14 | Native notifications and denied permission |
+| DT-11 | 14 | Artifact delete and Trash recovery |
+| DT-12 | 14 | Copy artifact contents authorization boundary |
+| DT-13 | 14 | Repository file filter persistence |
+| DT-14 | 14 | Artifact file timestamp display |
+| DT-15 | 14 | Workspace readiness indicator accuracy |
+| DT-16 | 14 | Dialog, dropdown, and tooltip z-index stacking |
 | CX-01 | 15 | Root `AGENTS.md` instruction loading |
 | CX-02 | 15 | Nested context loads only when scoped |
 | CX-03 | 15 | Custom context filenames and ordering |
@@ -315,6 +321,8 @@ scenario (or an explicit not-applicable/blocked note):
 | PN-08 | 16 | Local provider stops and restarts |
 | PN-09 | 16 | OAuth expiry, refresh, and user cancellation |
 | PN-10 | 16 | Usage, cost, and statistics consistency |
+| PN-11 | 16 | Turn-local provider failover |
+| PN-12 | 16 | Auto-compact reduction setting scopes partial vs full compaction |
 | AP-01 | 17 | Authenticated serve startup requirement |
 | AP-02 | 17 | Missing, wrong, and correct shared secret |
 | AP-03 | 17 | Origin allowlist replacement semantics |

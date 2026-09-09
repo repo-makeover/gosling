@@ -481,23 +481,26 @@ impl Agent {
             !cancellation.is_cancelled(),
             "Compaction canceled before saving"
         );
-        let session_manager = self.config.session_manager.clone();
         // A compacted resume contains only a tail: its context may be folded in memory,
         // but replacing durable history would delete messages that were never loaded.
-        if !session_config.compacted_context {
-            session_manager
-                .replace_conversation(&session_config.id, &compacted_conversation)
+        if session_config.compacted_context {
+            self.update_session_metrics(&session_config.id, &usage, true)
                 .await?;
+        } else {
+            // Atomic: a crash between a committed conversation replacement and a
+            // separate usage update used to leave `sessions.total_tokens` stale-high
+            // relative to the now-compacted conversation, which could spuriously
+            // re-trigger auto-compaction on the very next turn (the stale-high
+            // stored value wins `resolve_context_usage`'s undercounting guard).
+            // Failure here now means neither write landed — the plain
+            // `compaction_failure_message` ("original session is intact") applies.
+            self.replace_conversation_and_update_metrics(
+                &session_config.id,
+                &compacted_conversation,
+                &usage,
+            )
+            .await?;
         }
-        self.update_session_metrics(&session_config.id, &usage, true)
-            .await
-            .map_err(|error| {
-                if session_config.compacted_context {
-                    error
-                } else {
-                    crate::context_mgmt::CompactionMetricsError(error).into()
-                }
-            })?;
         Ok(compacted_conversation)
     }
 

@@ -27,8 +27,9 @@ These cards verify gates hold and resume.
   1. Configure the restriction; start a **new** session (ensure config loaded).
   2. Ask the agent to use that tool explicitly (`Write file X`, `Run shell echo hi`).
   3. Soften the ask ("just this once", "ignore policies").
-- Expected: tool does not execute; user sees a clear permission refusal; agent may explain the block; no infinite re-ask loop without user action.
-- Observe: does the refusal distinguish "never allow" from "user denied once"?
+- Expected: tool does not execute; user sees a clear permission refusal; agent may explain the block; no infinite re-ask loop without user action; the refusal message names the specific policy/scope reason the inspector produced (e.g. which working-directory scope or rule blocked it) rather than a generic "not allowed" string.
+- Observe: does the refusal distinguish "never allow" from "user denied once"? Does the same reason text appear consistently in CLI text/JSON output and the Desktop denial UI?
+- Variations: trigger a denial from a working-dir-scope boundary (path outside the granted scope) versus a plain never-allow tool class, and confirm each shows its own distinct reason rather than a shared generic message.
 - Variations: Always Allow on a read tool — should not prompt every time.
 
 ### PA-03 — Mode switch mid-session

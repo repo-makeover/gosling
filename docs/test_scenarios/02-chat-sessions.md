@@ -40,6 +40,7 @@ persistence, isolation, and slash commands.
   2. Interrupt (Ctrl-C in CLI per product norms; Desktop stop control).
   3. Observe session state; send `Say READY` as a new turn.
 - Expected: provider/tool cancellation is observable; work stops within 10 seconds; session lands in a clear stopped/idle state; no output from the cancelled operation appears after terminal state; follow-up produces `READY` without a new session unless documented.
+- Variations: force the run to lose its lease/turn ownership (e.g. a competing client or server-side revocation) instead of a user-initiated cancel, and confirm the terminal state and any `terminal_error` metadata reported to CLI/ACP consumers distinguishes lease loss from a deliberate user cancellation rather than reporting both identically or as success.
 - Variations: interrupt twice quickly; navigate away mid-stream on Desktop and return; close the Desktop window mid-stream and reopen the session.
 
 ### CH-04 — Session persistence across relaunch

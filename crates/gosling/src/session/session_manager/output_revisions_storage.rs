@@ -523,6 +523,29 @@ impl SessionManager {
         .await?;
         let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
         let history = history_in_tx(&mut tx, &path).await?;
+        let current_digest = digest(&current.body);
+        // A previous restore/capture can commit its revision row and then be
+        // interrupted (crash, kill) before the paired file replacement lands
+        // — `restore_output_revision` and `finish_output_capture` both stage
+        // and fsync the new bytes before committing, but the DB commit still
+        // precedes the final atomic rename. Detect that specific signature —
+        // the live file exactly matches an EARLIER revision while a newer one
+        // is already recorded as latest — and refuse rather than silently
+        // layering another "Restored" row on top of the phantom one. A
+        // genuine external edit doesn't match this: its content matches no
+        // prior revision at all, so it still falls through to the baseline
+        // handling below, unchanged.
+        if let Some(latest) = history.last() {
+            if latest.content_hash != current_digest
+                && history.iter().any(|revision| {
+                    revision.version != latest.version && revision.content_hash == current_digest
+                })
+            {
+                anyhow::bail!(OutputRevisionError::Conflict(
+                    "A previous write to this output was recorded but never reached the file (interrupted mid-save); refresh its history before restoring again".into()
+                ));
+            }
+        }
         let contributor = OutputContributor {
             agent: "User".into(),
             session_id: session.id.clone(),
@@ -532,7 +555,7 @@ impl SessionManager {
         };
         if history
             .last()
-            .is_none_or(|last| last.content_hash != digest(&current.body))
+            .is_none_or(|last| last.content_hash != current_digest)
         {
             let baseline = revision(
                 &history,

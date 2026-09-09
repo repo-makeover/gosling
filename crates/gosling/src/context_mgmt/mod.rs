@@ -509,7 +509,21 @@ pub async fn check_if_compaction_needed(
             .unwrap_or(DEFAULT_COMPACTION_THRESHOLD)
     });
 
-    validate_compaction_settings(threshold, 0.0)?;
+    // An invalid threshold (bad config file, env var typo) must not turn every
+    // subsequent `reply()` into a hard failure for the life of the process —
+    // degrade to "auto-compaction disabled" with a one-time warning instead,
+    // the same way the pre-validation code path used to behave. Preferences
+    // written through the ACP API are still rejected at write time by
+    // `validate_compaction_settings` in `acp/server/config.rs`.
+    if let Err(error) = validate_compaction_settings(threshold, 0.0) {
+        static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            tracing::warn!(
+                "GOSLING_AUTO_COMPACT_THRESHOLD={threshold} is invalid ({error}); auto-compaction is disabled until it is corrected"
+            );
+        }
+        return Ok(false);
+    }
     // Skip tokenization only for the explicit disabled value.
     if threshold == 0.0 {
         return Ok(false);
@@ -1876,10 +1890,12 @@ mod tests {
         );
     }
 
-    // When auto-compact is disabled (threshold 0), check_if_compaction_needed
-    // must return false immediately without touching the tokenizer.
+    // When auto-compact is disabled (threshold 0) or misconfigured,
+    // check_if_compaction_needed must return Ok(false) rather than an error:
+    // a bad env var/config value must degrade auto-compaction, not turn every
+    // subsequent `reply()` call into a hard failure for the life of the process.
     #[tokio::test]
-    async fn test_check_if_compaction_needed_returns_false_when_disabled() {
+    async fn test_check_if_compaction_needed_returns_false_when_disabled_or_invalid() {
         let provider = MockProvider::new(Message::assistant().with_text("x"), 1_000);
         let session = crate::session::Session::default();
         let conversation = Conversation::new_unvalidated(vec![
@@ -1887,20 +1903,13 @@ mod tests {
             Message::assistant().with_text("Hi"),
         ]);
 
-        assert!(
-            !check_if_compaction_needed(&provider, &conversation, Some(0.0), &session)
-                .await
-                .unwrap()
-        );
-        for invalid_threshold in [1.0, 1.5, -0.1, f64::NAN] {
-            assert!(check_if_compaction_needed(
-                &provider,
-                &conversation,
-                Some(invalid_threshold),
-                &session
-            )
-            .await
-            .is_err());
+        for threshold in [0.0, 1.0, 1.5, -0.1, f64::NAN] {
+            assert!(
+                !check_if_compaction_needed(&provider, &conversation, Some(threshold), &session)
+                    .await
+                    .unwrap(),
+                "threshold {threshold} should leave auto-compaction disabled, not error"
+            );
         }
     }
 

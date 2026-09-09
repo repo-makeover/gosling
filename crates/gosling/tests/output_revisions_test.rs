@@ -885,6 +885,60 @@ async fn restore_commit_failure_leaves_live_bytes_unchanged() {
     assert_eq!(fixture.history().await.len(), 1);
 }
 
+// FSR-CROSS-002: `restore_output_revision` (and `finish_output_capture`)
+// commit their revision row before the paired file replacement lands. A
+// crash in that narrow window leaves a "phantom" latest revision: the DB
+// says the file was updated, but it never moved past an earlier revision's
+// exact bytes. A restore request in that state must refuse rather than
+// silently layer another revision on top of the phantom one.
+#[tokio::test]
+async fn restore_refuses_when_latest_revision_was_never_applied_to_the_file() {
+    let fixture = Fixture::new().await;
+    fixture
+        .write(&fixture.session, "first", "model-a", "Original")
+        .await;
+    let after_first = fs::read(&fixture.path).unwrap();
+    fixture
+        .write(&fixture.session, "second", "model-b", "Updated")
+        .await;
+    assert_eq!(fixture.history().await.len(), 2);
+
+    // Simulate a crash between the "second" write's DB commit and its file
+    // replacement: the DB already recorded version 2 as latest, but the file
+    // on disk never moved past version 1's exact bytes.
+    fs::write(&fixture.path, &after_first).unwrap();
+    let phantom_current_hash = fixture.get(1).await.current_hash.unwrap();
+
+    let result = fixture
+        .manager
+        .restore_output_revision(RestoreOutputRevisionRequest {
+            session_id: fixture.session.id.clone(),
+            path: fixture.path.to_string_lossy().into(),
+            version: 1,
+            expected_current_hash: phantom_current_hash,
+        })
+        .await;
+
+    assert!(
+        result.is_err(),
+        "restore must refuse when the live file still matches an earlier revision than the recorded latest"
+    );
+    assert!(result
+        .unwrap_err()
+        .to_string()
+        .contains("interrupted mid-save"));
+    assert_eq!(
+        fixture.history().await.len(),
+        2,
+        "the refusal must not insert a duplicate baseline or restored revision"
+    );
+    assert_eq!(
+        fs::read(&fixture.path).unwrap(),
+        after_first,
+        "the file must be left exactly as found"
+    );
+}
+
 #[tokio::test]
 async fn restore_uses_full_file_hash_not_body_hash() {
     let fixture = Fixture::new().await;

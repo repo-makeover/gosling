@@ -379,6 +379,68 @@ impl SessionStorage {
         Ok(())
     }
 
+    /// Same statement as `record_usage`, run against an existing transaction
+    /// instead of `pool` directly. Used by `MessageStorage::replace_conversation_and_record_usage`
+    /// so a compaction's message replacement and usage update commit or roll
+    /// back together — a crash between two separate commits used to leave
+    /// `sessions.total_tokens` reflecting the pre-compaction conversation
+    /// while the messages table already held the post-compaction one, which
+    /// could spuriously re-trigger auto-compaction on the next turn (the
+    /// stale-high stored value wins `resolve_context_usage`'s
+    /// `max(stored, estimated)` undercounting guard). Keep this SQL in sync
+    /// with `record_usage` above.
+    pub(super) async fn record_usage_in_tx(
+        tx: &mut sqlx::Transaction<'_, Sqlite>,
+        session_id: &str,
+        current_usage: Usage,
+        accumulated_delta: Usage,
+        cost_delta: Option<f64>,
+    ) -> Result<()> {
+        let result = sqlx::query(
+            r#"
+            UPDATE sessions
+            SET total_tokens = ?,
+                input_tokens = ?,
+                output_tokens = ?,
+                cache_read_tokens = ?,
+                cache_write_tokens = ?,
+                accumulated_total_tokens = CASE WHEN ? IS NULL THEN accumulated_total_tokens ELSE COALESCE(accumulated_total_tokens, 0) + ? END,
+                accumulated_input_tokens = CASE WHEN ? IS NULL THEN accumulated_input_tokens ELSE COALESCE(accumulated_input_tokens, 0) + ? END,
+                accumulated_output_tokens = CASE WHEN ? IS NULL THEN accumulated_output_tokens ELSE COALESCE(accumulated_output_tokens, 0) + ? END,
+                accumulated_cache_read_tokens = CASE WHEN ? IS NULL THEN accumulated_cache_read_tokens ELSE COALESCE(accumulated_cache_read_tokens, 0) + ? END,
+                accumulated_cache_write_tokens = CASE WHEN ? IS NULL THEN accumulated_cache_write_tokens ELSE COALESCE(accumulated_cache_write_tokens, 0) + ? END,
+                accumulated_cost = CASE WHEN ? IS NULL THEN accumulated_cost ELSE COALESCE(accumulated_cost, 0) + ? END,
+                updated_at = datetime('now')
+            WHERE id = ?
+            "#,
+        )
+        .bind(current_usage.total_tokens)
+        .bind(current_usage.input_tokens)
+        .bind(current_usage.output_tokens)
+        .bind(current_usage.cache_read_input_tokens)
+        .bind(current_usage.cache_write_input_tokens)
+        .bind(accumulated_delta.total_tokens)
+        .bind(accumulated_delta.total_tokens)
+        .bind(accumulated_delta.input_tokens)
+        .bind(accumulated_delta.input_tokens)
+        .bind(accumulated_delta.output_tokens)
+        .bind(accumulated_delta.output_tokens)
+        .bind(accumulated_delta.cache_read_input_tokens)
+        .bind(accumulated_delta.cache_read_input_tokens)
+        .bind(accumulated_delta.cache_write_input_tokens)
+        .bind(accumulated_delta.cache_write_input_tokens)
+        .bind(cost_delta)
+        .bind(cost_delta)
+        .bind(session_id)
+        .execute(&mut **tx)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            anyhow::bail!("Session not found: {session_id}");
+        }
+        Ok(())
+    }
+
     pub(super) async fn delete_session(&self, session_id: &str) -> Result<()> {
         let _write_guard = self.acquire_write_guard().await;
         let pool = self.pool().await?;

@@ -234,11 +234,12 @@ impl Agent {
             }
         };
 
-        manager
-            .replace_conversation(session_id, &compacted_conversation)
-            .await?;
-
-        self.update_session_metrics(session_id, &usage, true)
+        // Atomic: see `Agent::replace_conversation_and_update_metrics` — a crash
+        // between a separately-committed conversation replacement and usage
+        // update used to leave `sessions.total_tokens` stale-high relative to
+        // the now-compacted conversation, spuriously re-triggering
+        // auto-compaction on the next turn.
+        self.replace_conversation_and_update_metrics(session_id, &compacted_conversation, &usage)
             .await?;
 
         Ok(Some(user_only_assistant_text("Compaction complete")))
