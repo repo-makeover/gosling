@@ -78,6 +78,7 @@ const i18n = defineMessages({
   blocked: { id: 'artifactPane.blocked', defaultMessage: 'Blocked' },
   truncated: { id: 'artifactPane.truncated', defaultMessage: 'Truncated' },
   closePane: { id: 'artifactPane.closePane', defaultMessage: 'Close inputs and outputs pane' },
+  closeAllTabs: { id: 'artifactPane.closeAllTabs', defaultMessage: 'Close all' },
   openFile: { id: 'artifactPane.openFile', defaultMessage: 'Open file' },
   emptyTitle: { id: 'artifactPane.emptyTitle', defaultMessage: 'View an output or deliverable' },
   emptyBody: {
@@ -361,6 +362,7 @@ export function ArtifactPane() {
     artifacts,
     trashedArtifacts = [],
     closeTab,
+    closeAllTabs,
     forgetTrashedFiles,
     hideRepositoryFiles,
     openFile,
@@ -1139,6 +1141,15 @@ export function ArtifactPane() {
                   />
                 </button>
               ))}
+              <Button
+                variant="ghost"
+                size="xs"
+                className="ml-auto shrink-0 self-center"
+                onClick={closeAllTabs}
+                title={intl.formatMessage(i18n.closeAllTabs)}
+              >
+                {intl.formatMessage(i18n.closeAllTabs)}
+              </Button>
             </div>
           )}
 

@@ -43,6 +43,7 @@ interface ArtifactWorkbenchValue {
   artifacts: SessionArtifactDto[];
   trashedArtifacts: SessionArtifactDto[];
   closeTab: (id: string) => void;
+  closeAllTabs: () => void;
   forgetTrashedFiles: (paths: string[]) => void;
   hideRepositoryFiles: boolean;
   isOpen: boolean;
@@ -276,6 +277,10 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
     [updateCurrent]
   );
 
+  const closeAllTabs = useCallback(() => {
+    updateCurrent((state) => ({ ...state, tabs: [], activeTabId: null }));
+  }, [updateCurrent]);
+
   const forgetTrashedFiles = useCallback(
     (paths: string[]) => {
       const removedPaths = new Set(paths);
@@ -374,6 +379,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
       artifacts,
       trashedArtifacts,
       closeTab,
+      closeAllTabs,
       forgetTrashedFiles,
       hideRepositoryFiles,
       isOpen,
@@ -396,6 +402,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
       artifacts,
       trashedArtifacts,
       closeTab,
+      closeAllTabs,
       forgetTrashedFiles,
       hideRepositoryFiles,
       current.activeTabId,

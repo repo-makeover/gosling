@@ -1137,20 +1137,30 @@ function ToolResultView({
               } else if (resourceLinkPath) {
                 openFile(resourceLinkPath, workingDirectory, workspaceId);
               } else if (embeddedResource && 'text' in embeddedResource) {
-                openContent({
-                  title: artifactTitleFromPath(embeddedResource.uri),
-                  content: embeddedResource.text,
-                  mimeType: embeddedResource.mimeType ?? 'text/plain',
-                  workspaceId,
-                });
+                const embeddedPath = localFilePathFromUri(embeddedResource.uri);
+                if (embeddedPath) {
+                  openFile(embeddedPath, workingDirectory, workspaceId);
+                } else {
+                  openContent({
+                    title: artifactTitleFromPath(embeddedResource.uri),
+                    content: embeddedResource.text,
+                    mimeType: embeddedResource.mimeType ?? 'text/plain',
+                    workspaceId,
+                  });
+                }
               } else if (embeddedResource && 'blob' in embeddedResource) {
-                openContent({
-                  title,
-                  content: embeddedResource.blob,
-                  encoding: 'base64',
-                  mimeType: embeddedResource.mimeType ?? 'application/octet-stream',
-                  workspaceId,
-                });
+                const embeddedPath = localFilePathFromUri(embeddedResource.uri);
+                if (embeddedPath) {
+                  openFile(embeddedPath, workingDirectory, workspaceId);
+                } else {
+                  openContent({
+                    title,
+                    content: embeddedResource.blob,
+                    encoding: 'base64',
+                    mimeType: embeddedResource.mimeType ?? 'application/octet-stream',
+                    workspaceId,
+                  });
+                }
               }
             }}
           >
