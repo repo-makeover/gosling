@@ -1,5 +1,22 @@
 # TODO
 
+## 2026-09-08 evening independent audit repairs
+
+- [x] **DAT-TODAY-001/002** — Keep saved revisions exportable independently of live
+      snapshot eligibility; do not invent authorship from skipped observations.
+- [x] **REL-TODAY-001/002** — Preserve terminal failure, cancellation and lease-loss
+      outcomes through compaction, ACP and CLI, including cancellation at stream EOF.
+- [x] **WFG-TODAY-001/002/003/004** — Correct unread activity and output-title freshness;
+      refresh stale interaction tests and locale defaults.
+- [x] **ARC-TODAY-001/002** — Share artifact IPC channel declarations and return current
+      folder access metadata after directory mutations.
+
+Closed with source regression evidence: 1,884 core library tests, 10 compaction tests,
+28 revision tests, 20 isolated CLI session tests, all 1,271 Desktop tests, and final
+Clippy/type/lint/format/locale checks. Native and packaged-app verification was not
+performed. See the [audit and repair report](cloud/2026-09-08-evening-audit-repair.md)
+and [execution record](logs/session/2026-09-08-evening-audit-repairs.md).
+
 ## 2026-09-08 confirmation dialog layering
 
 - [x] **MODAL-LAYER-001** — Put shared dialogs and their backdrops above the

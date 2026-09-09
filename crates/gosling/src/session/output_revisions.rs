@@ -68,6 +68,10 @@ pub(crate) fn is_output_document(path: &Path) -> bool {
 }
 
 pub(crate) fn output_roots(session: &Session) -> Vec<PathBuf> {
+    output_roots_with_warnings(session).0
+}
+
+pub(crate) fn output_roots_with_warnings(session: &Session) -> (Vec<PathBuf>, Vec<String>) {
     let mut roots = vec![
         session.working_dir.join("Outputs"),
         session.working_dir.join("outputs"),
@@ -80,12 +84,21 @@ pub(crate) fn output_roots(session: &Session) -> Vec<PathBuf> {
                 .map(|folder| PathBuf::from(&folder.path)),
         );
     }
-    roots
+    let mut warnings = Vec::new();
+    let roots = roots
         .into_iter()
-        .filter_map(|root| root.canonicalize().ok())
+        .filter_map(|root| match root.canonicalize() {
+            Ok(root) => Some(root),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => {
+                warnings.push(format!("{}: {error}", root.display()));
+                None
+            }
+        })
         .collect::<BTreeSet<_>>()
         .into_iter()
-        .collect()
+        .collect();
+    (roots, warnings)
 }
 
 pub(crate) fn canonical_output_path(

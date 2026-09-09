@@ -14,8 +14,10 @@ vi.mock('../../hooks/useNavigationSessions', () => ({
   useNavigationSessions: vi.fn(),
 }));
 
+const route = vi.hoisted(() => ({ pathname: '/' }));
+
 vi.mock('react-router-dom', () => ({
-  useLocation: () => ({ pathname: '/' }),
+  useLocation: () => route,
   useNavigate: () => vi.fn(),
 }));
 
@@ -67,6 +69,8 @@ describe('NavigationPanel workspaces/chats divider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    route.pathname = '/';
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     vi.mocked(useNavigationContext).mockReturnValue({
       isNavExpanded: true,
     } as ReturnType<typeof useNavigationContext>);
@@ -167,6 +171,8 @@ describe('NavigationPanel workspace unread activity', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    route.pathname = '/';
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     vi.mocked(useNavigationContext).mockReturnValue({
       isNavExpanded: true,
       setIsNavExpanded: vi.fn(),
@@ -232,6 +238,89 @@ describe('NavigationPanel workspace unread activity', () => {
     fireEvent.click(screen.getByText('Second math chat'));
     expect(screen.queryByLabelText('Has new activity')).not.toBeInTheDocument();
     expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+  });
+
+  it('does not mark a reply unread while its chat is visible and focused', () => {
+    route.pathname = '/pair';
+    vi.mocked(useNavigationSessions).mockReturnValue({
+      recentSessions: [],
+      activeSessionId: 'math-1',
+      fetchSessions: vi.fn(),
+      handleNavClick: vi.fn(),
+      handleSessionClick: onSessionClick,
+    });
+    renderPanel();
+    finishChat('math-1', 'math');
+    expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+    finishChat('math-2', 'math');
+    expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
+  });
+
+  it('acknowledges a chat opened through navigation and when its window regains focus', () => {
+    const { rerender } = renderPanel();
+    finishChat('math-1', 'math');
+    route.pathname = '/pair';
+    vi.mocked(useNavigationSessions).mockReturnValue({
+      recentSessions: [],
+      activeSessionId: 'math-1',
+      fetchSessions: vi.fn(),
+      handleNavClick: vi.fn(),
+      handleSessionClick: onSessionClick,
+    });
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    rerender(<Navigation />);
+    expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
+    vi.mocked(document.hasFocus).mockReturnValue(true);
+    fireEvent.focus(window);
+    expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+  });
+
+  it('keeps a hidden active chat unread until its document becomes visible', () => {
+    route.pathname = '/pair';
+    vi.mocked(useNavigationSessions).mockReturnValue({
+      recentSessions: [],
+      activeSessionId: 'math-1',
+      fetchSessions: vi.fn(),
+      handleNavClick: vi.fn(),
+      handleSessionClick: onSessionClick,
+    });
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    renderPanel();
+    finishChat('math-1', 'math');
+    expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
+    visibility.mockReturnValue('visible');
+    fireEvent(document, new Event('visibilitychange'));
+    expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+    visibility.mockRestore();
+  });
+
+  it('requires a new assistant reply even if user insertion advances message count', () => {
+    renderPanel();
+    const replyStatus = (streamState: string, lastReplyId: string | null, messageCount: number) =>
+      fireEvent(
+        window,
+        new CustomEvent(AppEvents.SESSION_STATUS_UPDATE, {
+          detail: {
+            sessionId: 'math-1',
+            workspaceId: 'math',
+            streamState,
+            lastReplyId,
+            messageCount,
+          },
+        })
+      );
+    replyStatus('idle', 'old-reply', 2);
+    replyStatus('streaming', 'old-reply', 2);
+    replyStatus('idle', 'old-reply', 3);
+    expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+    // A compaction can reduce history without producing a new visible reply.
+    replyStatus('streaming', 'old-reply', 3);
+    replyStatus('idle', null, 1);
+    expect(screen.queryByText('Ready workspace: math')).not.toBeInTheDocument();
+    // The first streaming event may already include the reply after React batching.
+    replyStatus('streaming', 'new-reply', 3);
+    replyStatus('idle', 'new-reply', 3);
+    expect(screen.getByText('Ready workspace: math')).toBeInTheDocument();
   });
 
   it('excludes error and streaming chats but keeps other ready chats in that workspace', () => {

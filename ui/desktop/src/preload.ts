@@ -248,13 +248,13 @@ const electronAPI: ElectronAPI = {
   readArtifactFile: (filePath: string, baseDirectory?: string) =>
     ipcRenderer.invoke('read-artifact-file', filePath, baseDirectory),
   copyArtifactContents: (filePath: string, baseDirectory?: string) =>
-    ipcRenderer.invoke('copy-artifact-contents', filePath, baseDirectory),
+    ipcRenderer.invoke(desktopCommandChannels.copyArtifactContents, filePath, baseDirectory),
   readArtifactTitles: (requests: Array<{ filePath: string; baseDirectory?: string }>) =>
     ipcRenderer.invoke('read-artifact-titles', requests),
   classifyArtifactRepositories: (filePaths: string[]) =>
-    ipcRenderer.invoke('classify-artifact-repositories', filePaths),
+    ipcRenderer.invoke(desktopCommandChannels.classifyArtifactRepositories, filePaths),
   getArtifactFileTimestamps: (filePaths: string[]) =>
-    ipcRenderer.invoke('get-artifact-file-timestamps', filePaths),
+    ipcRenderer.invoke(desktopCommandChannels.getArtifactFileTimestamps, filePaths),
   openArtifactFile: (filePath: string, baseDirectory?: string) =>
     ipcRenderer.invoke('open-artifact-file', filePath, baseDirectory),
   revealArtifactFile: (filePath: string, baseDirectory?: string) =>
@@ -262,7 +262,8 @@ const electronAPI: ElectronAPI = {
   writeFile: (filePath: string, content: string) =>
     ipcRenderer.invoke('write-file', filePath, content),
   deleteFile: (filePath: string) => ipcRenderer.invoke('delete-file', filePath),
-  trashArtifactFiles: (paths: string[]) => ipcRenderer.invoke('trash-artifact-files', paths),
+  trashArtifactFiles: (paths: string[]) =>
+    ipcRenderer.invoke(desktopCommandChannels.trashArtifactFiles, paths),
   ensureDirectory: (dirPath: string) => ipcRenderer.invoke('ensure-directory', dirPath),
   listFiles: (dirPath: string, extension?: string) =>
     ipcRenderer.invoke('list-files', dirPath, extension),

@@ -2,6 +2,7 @@ import type { SessionInfo } from '@agentclientprotocol/sdk';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAcpClient } from '../acpConnection';
 import {
+  acpAddSessionWorkingDir,
   acpAppendSessionSystemPrompt,
   acpArchiveSession,
   acpGetSessionListItem,
@@ -9,6 +10,7 @@ import {
   acpListSessions,
   acpLoadSession,
   acpNewSession,
+  acpRemoveSessionWorkingDir,
   acpUnarchiveSession,
   sessionInfoToSession,
 } from '../sessions';
@@ -35,6 +37,22 @@ function sessionInfo(overrides: Partial<SessionInfo> = {}): SessionInfo {
 describe('ACP sessions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('preserves authoritative folder access from directory mutations', async () => {
+    const response = {
+      workingDir: '/workspace',
+      additionalWorkingDirs: ['/private'],
+      workspaceFolderRoots: [{ path: '/private', access: 'read_write' }],
+    };
+    vi.mocked(getAcpClient).mockResolvedValue({
+      gosling: {
+        sessionWorkingDirsAdd_unstable: vi.fn().mockResolvedValue(response),
+        sessionWorkingDirsRemove_unstable: vi.fn().mockResolvedValue(response),
+      },
+    } as never);
+    expect(await acpAddSessionWorkingDir('session-1', '/private')).toEqual(response);
+    expect(await acpRemoveSessionWorkingDir('session-1', '/old')).toEqual(response);
   });
 
   it('preserves session type from ACP session info metadata', () => {

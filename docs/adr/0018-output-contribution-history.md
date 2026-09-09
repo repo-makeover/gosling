@@ -50,6 +50,10 @@ history nor silently recreates a missing file; saved bytes can still be exported
 directory and session authorization remain available. Library copies have separate paths and do not
 automatically inherit output history.
 
+Saved-revision retrieval does not require a readable live snapshot: if the current file is
+missing, unreadable, or over the snapshot limit, committed bytes remain available after the
+same authorization checks. The optional current hash is absent and restore remains disabled.
+
 ## Limits and retention
 
 This is local saved revision history, not Git commits or a continuous filesystem watcher. Tools

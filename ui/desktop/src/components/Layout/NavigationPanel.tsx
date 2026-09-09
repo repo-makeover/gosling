@@ -43,6 +43,8 @@ interface SessionStatus {
   workspaceId: string | null;
   streamState: StreamState;
   hasUnreadActivity: boolean;
+  lastReplyId?: string | null;
+  replyBeforeStream?: string | null;
 }
 
 const WORKSPACES_HEIGHT_KEY = 'workspaces_sidebar_height';
@@ -275,6 +277,9 @@ export const Navigation: React.FC<{ className?: string }> = ({ className }) => {
   const { recentSessions, activeSessionId, fetchSessions, handleNavClick, handleSessionClick } =
     useNavigationSessions();
 
+  const viewedSessionId = useRef<string | undefined>(undefined);
+  viewedSessionId.current = location.pathname === '/pair' ? activeSessionId : undefined;
+
   const [sessionStatuses, setSessionStatuses] = useState<Map<string, SessionStatus>>(new Map());
   const unreadWorkspaceIds = useMemo(
     () =>
@@ -306,21 +311,36 @@ export const Navigation: React.FC<{ className?: string }> = ({ className }) => {
 
   useEffect(() => {
     const handleStatusUpdate = (event: Event) => {
-      const { sessionId, workspaceId, streamState } = (
+      const { sessionId, workspaceId, streamState, lastReplyId } = (
         event as CustomEvent<{
           sessionId: string;
           workspaceId: string | null;
           streamState: StreamState;
+          lastReplyId?: string | null;
         }>
       ).detail;
       setSessionStatuses((prev) => {
         const existing = prev.get(sessionId);
-        const shouldMarkUnread = existing?.streamState === 'streaming' && streamState === 'idle';
+        const isViewed =
+          viewedSessionId.current === sessionId &&
+          document.visibilityState !== 'hidden' &&
+          document.hasFocus();
+        const replyBeforeStream =
+          existing?.streamState === 'streaming'
+            ? existing.replyBeforeStream
+            : existing?.lastReplyId;
+        // Missing reply metadata preserves compatibility with older event producers.
+        const hasNewReply =
+          lastReplyId === undefined || (lastReplyId !== null && lastReplyId !== replyBeforeStream);
+        const shouldMarkUnread =
+          existing?.streamState === 'streaming' && streamState === 'idle' && hasNewReply;
         const next = new Map(prev);
         next.set(sessionId, {
           workspaceId,
           streamState,
-          hasUnreadActivity: existing?.hasUnreadActivity || shouldMarkUnread,
+          hasUnreadActivity: !isViewed && (existing?.hasUnreadActivity || shouldMarkUnread),
+          lastReplyId,
+          replyBeforeStream,
         });
         return next;
       });
@@ -356,6 +376,21 @@ export const Navigation: React.FC<{ className?: string }> = ({ className }) => {
       return prev;
     });
   }, []);
+
+  useEffect(() => {
+    const acknowledgeVisibleChat = () => {
+      if (viewedSessionId.current && document.visibilityState !== 'hidden' && document.hasFocus()) {
+        clearUnread(viewedSessionId.current);
+      }
+    };
+    acknowledgeVisibleChat();
+    window.addEventListener('focus', acknowledgeVisibleChat);
+    document.addEventListener('visibilitychange', acknowledgeVisibleChat);
+    return () => {
+      window.removeEventListener('focus', acknowledgeVisibleChat);
+      document.removeEventListener('visibilitychange', acknowledgeVisibleChat);
+    };
+  }, [activeSessionId, location.pathname, clearUnread]);
 
   const navFocusRef = useRef<HTMLDivElement>(null);
 

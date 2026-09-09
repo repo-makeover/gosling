@@ -762,7 +762,15 @@ export type AddSessionWorkingDirRequest_unstable = {
 export type SessionWorkingDirsResponse_unstable = {
     workingDir: string;
     additionalWorkingDirs: Array<string>;
+    workspaceFolderRoots?: Array<WorkspaceFolderPolicyRoot>;
 };
+
+export type WorkspaceFolderPolicyRoot = {
+    path: string;
+    access: WorkspaceFolderAccess;
+};
+
+export type WorkspaceFolderAccess = 'read' | 'read_write';
 
 /**
  * Remove a previously added extra working directory from a session. The
@@ -2164,7 +2172,7 @@ export type GetOutputRevisionResponse_unstable = {
     revision: OutputRevisionDto;
     contentBase64: string;
     /**
-     * SHA-256 of all current on-disk bytes, including the footer; absent if missing.
+     * SHA-256 of all current on-disk bytes, including the footer; absent if a safe snapshot is unavailable.
      */
     currentHash?: string | null;
 };
@@ -2637,8 +2645,6 @@ export type WorkspaceFolder = {
 };
 
 export type WorkspaceFolderKind = 'source' | 'reference' | 'working';
-
-export type WorkspaceFolderAccess = 'read' | 'read_write';
 
 export type ProductOutputFolder = {
     id: string;

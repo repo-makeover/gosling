@@ -500,6 +500,7 @@ export async function acpAppendSessionSystemPrompt(
 export interface SessionWorkingDirs {
   workingDir: string;
   additionalWorkingDirs: string[];
+  workspaceFolderRoots?: Session['workspace_folder_roots'];
 }
 
 export async function acpAddSessionWorkingDir(
@@ -511,6 +512,7 @@ export async function acpAddSessionWorkingDir(
   return {
     workingDir: response.workingDir,
     additionalWorkingDirs: response.additionalWorkingDirs,
+    workspaceFolderRoots: response.workspaceFolderRoots,
   };
 }
 
@@ -526,6 +528,7 @@ export async function acpRemoveSessionWorkingDir(
   return {
     workingDir: response.workingDir,
     additionalWorkingDirs: response.additionalWorkingDirs,
+    workspaceFolderRoots: response.workspaceFolderRoots,
   };
 }
 

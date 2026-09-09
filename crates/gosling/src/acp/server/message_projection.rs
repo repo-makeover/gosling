@@ -14,6 +14,20 @@ pub(super) fn outcome_to_confirmation(
     }
 }
 
+pub(super) fn prompt_error_from_message(message: &Message) -> Option<agent_client_protocol::Error> {
+    message
+        .content
+        .iter()
+        .find_map(prompt_error_from_message_content)
+        .or_else(|| {
+            message
+                .metadata
+                .terminal_error
+                .as_ref()
+                .map(|reason| agent_client_protocol::Error::new(-32603, reason.clone()))
+        })
+}
+
 pub(super) fn prompt_error_from_message_content(
     content_item: &MessageContent,
 ) -> Option<agent_client_protocol::Error> {

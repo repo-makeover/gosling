@@ -7,8 +7,9 @@ use crate::session::artifacts::{
 };
 use crate::session::output_revisions::{
     annotated_snapshot, canonical_output_path, digest, is_output_document, markdown_body,
-    output_roots, prepare_replacement, read_snapshot, replace_if_unchanged, scan_output_roots,
-    OutputRevisionError, OutputSnapshot, MAX_CAPTURE_BYTES, MAX_OUTPUT_REVISION_BYTES,
+    output_roots, output_roots_with_warnings, prepare_replacement, read_snapshot,
+    replace_if_unchanged, scan_output_roots, OutputRevisionError, OutputSnapshot,
+    MAX_CAPTURE_BYTES, MAX_OUTPUT_REVISION_BYTES,
 };
 use anyhow::{ensure, Result};
 use base64::Engine;
@@ -27,6 +28,8 @@ pub struct OutputCapture {
     call: CallToolRequestParams,
     before: BTreeMap<PathBuf, OutputSnapshot>,
     candidates: BTreeSet<PathBuf>,
+    unobserved: BTreeSet<PathBuf>,
+    scan_complete: bool,
     warnings: Vec<String>,
 }
 
@@ -124,16 +127,34 @@ impl SessionManager {
                 .into_iter()
                 .filter(|path| is_output_document(path))
                 .collect();
-            let (observed, mut warnings) = scan_output_roots(&output_roots(&session));
+            let (roots, mut warnings) = output_roots_with_warnings(&session);
+            let (observed, scan_warnings) = scan_output_roots(&roots);
+            warnings.extend(scan_warnings);
+            let mut scan_complete = warnings.is_empty();
             let candidates = candidates
                 .iter()
                 .chain(observed.iter().filter(|path| !candidates.contains(*path)));
             let mut before = BTreeMap::new();
             let mut authorized = BTreeSet::new();
+            let mut unobserved = BTreeSet::new();
             let mut total = 0;
             for candidate in candidates {
-                let Ok(path) = canonical_output_path(&session, candidate, true) else {
-                    continue;
+                let path = match canonical_output_path(&session, candidate, true) {
+                    Ok(path) => path,
+                    Err(error)
+                        if error
+                            .downcast_ref::<std::io::Error>()
+                            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+                    {
+                        continue;
+                    }
+                    Err(error) => {
+                        if error.downcast_ref::<std::io::Error>().is_some() {
+                            scan_complete = false;
+                            warnings.push(format!("{}: {error}", candidate.display()));
+                        }
+                        continue;
+                    }
                 };
                 match read_snapshot(&path) {
                     Ok(Some(snapshot)) if total + snapshot.bytes.len() <= MAX_CAPTURE_BYTES => {
@@ -146,10 +167,12 @@ impl SessionManager {
                             "{}: Output observation exceeded 32 MiB",
                             path.display()
                         ));
+                        unobserved.insert(path);
                         continue;
                     }
                     Err(error) => {
                         warnings.push(format!("{}: {error}", path.display()));
+                        unobserved.insert(path);
                         continue;
                     }
                 }
@@ -163,6 +186,8 @@ impl SessionManager {
                 call,
                 before,
                 candidates: authorized,
+                unobserved,
+                scan_complete,
                 warnings,
             }))
         })
@@ -233,6 +258,12 @@ impl SessionManager {
         let (after, mut warnings) = after;
         warnings.extend(capture.warnings.clone());
         for (path, after) in after {
+            // Incomplete observation cannot establish that a file was created or changed.
+            if capture.unobserved.contains(&path)
+                || (!capture.scan_complete && !capture.candidates.contains(&path))
+            {
+                continue;
+            }
             let result: Result<()> = async {
                 let before = capture.before.get(&path);
                 let unchanged = before.is_some_and(|before| before.body == after.body);
@@ -447,8 +478,11 @@ impl SessionManager {
         .bind(request.version)
         .fetch_one(self.storage.pool().await?)
         .await?;
+        // Saved bytes remain exportable when the live file cannot be safely snapshotted.
         let current_hash = tokio::task::spawn_blocking(move || read_snapshot(&path))
-            .await??
+            .await?
+            .ok()
+            .flatten()
             .map(|snapshot| snapshot.hash);
         Ok(GetOutputRevisionResponse {
             revision: serde_json::from_str(&metadata)?,

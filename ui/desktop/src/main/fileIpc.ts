@@ -10,6 +10,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'child_process';
+import { desktopCommandChannels } from '../ipc/channels';
 import type { ArtifactRoutingConfig, ArtifactSaveRequest } from '../types/artifactRouter';
 import { saveArtifactWithDialog } from '../utils/artifactSave';
 import { canonicalizePotentialPath } from '../utils/rendererFileAccess';
@@ -62,15 +63,15 @@ export const FILE_IPC_CHANNELS = [
   'check-ollama',
   'read-file',
   'read-artifact-file',
-  'copy-artifact-contents',
+  desktopCommandChannels.copyArtifactContents,
   'read-artifact-titles',
-  'get-artifact-file-timestamps',
-  'classify-artifact-repositories',
+  desktopCommandChannels.getArtifactFileTimestamps,
+  desktopCommandChannels.classifyArtifactRepositories,
   'open-artifact-file',
   'reveal-artifact-file',
   'write-file',
   'delete-file',
-  'trash-artifact-files',
+  desktopCommandChannels.trashArtifactFiles,
   'ensure-directory',
   'list-files',
   'show-message-box',
@@ -326,7 +327,7 @@ export function registerFileIpcHandlers(
   );
 
   targetIpcMain.handle(
-    'copy-artifact-contents',
+    desktopCommandChannels.copyArtifactContents,
     async (event, filePath: string, baseDirectory?: string) => {
       const resolvedPath = await assertRendererArtifactFileAccess(
         event.sender.id,
@@ -427,7 +428,7 @@ export function registerFileIpcHandlers(
   );
 
   targetIpcMain.handle(
-    'get-artifact-file-timestamps',
+    desktopCommandChannels.getArtifactFileTimestamps,
     async (event, filePaths: string[]): Promise<ArtifactFileTimestampMap> => {
       if (
         !Array.isArray(filePaths) ||
@@ -460,7 +461,7 @@ export function registerFileIpcHandlers(
   );
 
   targetIpcMain.handle(
-    'classify-artifact-repositories',
+    desktopCommandChannels.classifyArtifactRepositories,
     async (event, filePaths: string[]): Promise<ArtifactRepositoryClassification> => {
       if (
         !Array.isArray(filePaths) ||
@@ -532,58 +533,61 @@ export function registerFileIpcHandlers(
       return false;
     }
   });
-  targetIpcMain.handle('trash-artifact-files', async (event, requestedPaths: unknown) => {
-    if (
-      !Array.isArray(requestedPaths) ||
-      requestedPaths.length === 0 ||
-      requestedPaths.length > ARTIFACT_TRASH_BATCH_LIMIT ||
-      !requestedPaths.every(
-        (filePath) =>
-          typeof filePath === 'string' &&
-          filePath.length <= 4096 &&
-          !filePath.includes('\0') &&
-          path.isAbsolute(filePath)
-      )
-    ) {
-      throw new Error(`Select between 1 and ${ARTIFACT_TRASH_BATCH_LIMIT} local files.`);
-    }
-
-    const results: ArtifactTrashResult[] = [];
-    for (const filePath of new Set<string>(requestedPaths)) {
-      try {
-        const authorizedPath = await assertRendererArtifactFileAccess(event.sender.id, filePath);
-        const requestedFile = await fs.lstat(filePath).catch((error: NodeJS.ErrnoException) => {
-          if (error.code === 'ENOENT') return null;
-          throw error;
-        });
-        if (!requestedFile) {
-          results.push({ path: filePath, status: 'missing' });
-          continue;
-        }
-        if (!requestedFile.isFile()) {
-          throw new Error('Only regular files can be moved to Trash from this pane.');
-        }
-        const authorizedFile = await fs.lstat(authorizedPath);
-        if (
-          !authorizedFile.isFile() ||
-          requestedFile.dev !== authorizedFile.dev ||
-          requestedFile.ino !== authorizedFile.ino
-        ) {
-          throw new Error('The file changed while preparing deletion. Try again.');
-        }
-        // Trash failures must never fall back to permanent deletion.
-        await shell.trashItem(authorizedPath);
-        results.push({ path: filePath, status: 'trashed' });
-      } catch (error) {
-        results.push({
-          path: filePath,
-          status: 'failed',
-          error: errorMessage(error, 'Unable to move file to Trash.'),
-        });
+  targetIpcMain.handle(
+    desktopCommandChannels.trashArtifactFiles,
+    async (event, requestedPaths: unknown) => {
+      if (
+        !Array.isArray(requestedPaths) ||
+        requestedPaths.length === 0 ||
+        requestedPaths.length > ARTIFACT_TRASH_BATCH_LIMIT ||
+        !requestedPaths.every(
+          (filePath) =>
+            typeof filePath === 'string' &&
+            filePath.length <= 4096 &&
+            !filePath.includes('\0') &&
+            path.isAbsolute(filePath)
+        )
+      ) {
+        throw new Error(`Select between 1 and ${ARTIFACT_TRASH_BATCH_LIMIT} local files.`);
       }
+
+      const results: ArtifactTrashResult[] = [];
+      for (const filePath of new Set<string>(requestedPaths)) {
+        try {
+          const authorizedPath = await assertRendererArtifactFileAccess(event.sender.id, filePath);
+          const requestedFile = await fs.lstat(filePath).catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return null;
+            throw error;
+          });
+          if (!requestedFile) {
+            results.push({ path: filePath, status: 'missing' });
+            continue;
+          }
+          if (!requestedFile.isFile()) {
+            throw new Error('Only regular files can be moved to Trash from this pane.');
+          }
+          const authorizedFile = await fs.lstat(authorizedPath);
+          if (
+            !authorizedFile.isFile() ||
+            requestedFile.dev !== authorizedFile.dev ||
+            requestedFile.ino !== authorizedFile.ino
+          ) {
+            throw new Error('The file changed while preparing deletion. Try again.');
+          }
+          // Trash failures must never fall back to permanent deletion.
+          await shell.trashItem(authorizedPath);
+          results.push({ path: filePath, status: 'trashed' });
+        } catch (error) {
+          results.push({
+            path: filePath,
+            status: 'failed',
+            error: errorMessage(error, 'Unable to move file to Trash.'),
+          });
+        }
+      }
+      return results;
     }
-    return results;
-  });
+  );
   // Enhanced file operations
   targetIpcMain.handle('ensure-directory', async (event, dirPath) => {
     try {

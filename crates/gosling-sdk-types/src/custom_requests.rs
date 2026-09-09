@@ -132,6 +132,8 @@ pub struct UpdateWorkingDirRequest {
 pub struct SessionWorkingDirsResponse {
     pub working_dir: String,
     pub additional_working_dirs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_folder_roots: Vec<WorkspaceFolderPolicyRoot>,
 }
 
 /// Add an extra working directory to a session. The agent gets the same full
@@ -901,7 +903,7 @@ pub struct GetOutputRevisionRequest {
 pub struct GetOutputRevisionResponse {
     pub revision: OutputRevisionDto,
     pub content_base64: String,
-    /// SHA-256 of all current on-disk bytes, including the footer; absent if missing.
+    /// SHA-256 of all current on-disk bytes, including the footer; absent if a safe snapshot is unavailable.
     pub current_hash: Option<String>,
 }
 

@@ -1193,6 +1193,7 @@ impl CliSession {
         let mut last_usage: Option<ProviderUsage> = None;
         let mut terminal_error: Option<String> = None;
         let mut execution_limit_reached = false;
+        let mut interrupted = false;
 
         use futures::StreamExt;
         loop {
@@ -1366,26 +1367,31 @@ impl CliSession {
                             }
                             break;
                         }
-                        None => break,
+                        None => {
+                            // A cancelled command can finish before this select polls cancellation.
+                            interrupted = cancel_token_clone.is_cancelled();
+                            drop(stream);
+                            break;
+                        }
                     }
                 }
                 _ = cancel_token_clone.cancelled() => {
+                    interrupted = true;
                     drop(stream);
-                    if let Err(e) = self
-                        .handle_interrupted_messages(
-                            true,
-                            interactive,
-                            turn_message_id.as_deref(),
-                        )
-                        .await
-                    {
-                        eprintln!("Error handling interruption: {}", e);
-                    }
-                    if !interactive {
-                        terminal_error = Some("Run cancelled by user".to_string());
-                    }
                     break;
                 }
+            }
+        }
+
+        if interrupted {
+            if let Err(e) = self
+                .handle_interrupted_messages(true, interactive, turn_message_id.as_deref())
+                .await
+            {
+                eprintln!("Error handling interruption: {}", e);
+            }
+            if !interactive {
+                terminal_error = Some("Run cancelled by user".to_string());
             }
         }
 
@@ -2658,6 +2664,107 @@ mod tests {
             Some("provider unavailable")
         );
         assert_eq!(terminal_error_reason(&unmarked), None);
+    }
+
+    #[tokio::test]
+    async fn cancelled_empty_reply_is_not_successful_in_machine_output() {
+        for output_format in ["json", "stream-json"] {
+            for _ in 0..16 {
+                let temp = tempfile::tempdir().unwrap();
+                let manager = Arc::new(gosling::session::SessionManager::new(temp.path().into()));
+                let agent = Agent::with_config(gosling::agents::AgentConfig::new(
+                    manager.clone(),
+                    Arc::new(gosling::config::PermissionManager::new(temp.path().into())),
+                    GoslingMode::Auto,
+                    true,
+                    gosling::agents::GoslingPlatform::GoslingCli,
+                ));
+                let session = manager
+                    .create_session(
+                        temp.path().into(),
+                        "Cancelled reply".into(),
+                        gosling::session::SessionType::Hidden,
+                        GoslingMode::Auto,
+                    )
+                    .await
+                    .unwrap();
+                let mut cli = CliSession::new(
+                    agent,
+                    session.id.clone(),
+                    false,
+                    None,
+                    None,
+                    output_format.into(),
+                    false,
+                )
+                .await;
+                cli.messages
+                    .push(Message::user().with_text("/compact").with_generated_id());
+                let cancel = CancellationToken::new();
+                cancel.cancel();
+
+                let error = cli
+                    .process_agent_response(false, cancel)
+                    .await
+                    .expect_err("cancelled EOF must not report completion");
+                assert_eq!(error.to_string(), "Run cancelled by user");
+                let stored = manager.get_session(&session.id, true).await.unwrap();
+                let notices = stored
+                    .conversation
+                    .unwrap()
+                    .messages()
+                    .iter()
+                    .filter(|message| {
+                        message.as_concat_text() == "Run cancelled by user before completion."
+                    })
+                    .count();
+                assert_eq!(notices, 1, "cancellation cleanup must run exactly once");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn uncancelled_command_reply_preserves_machine_output_success() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = Arc::new(gosling::session::SessionManager::new(temp.path().into()));
+        let agent = Agent::with_config(gosling::agents::AgentConfig::new(
+            manager.clone(),
+            Arc::new(gosling::config::PermissionManager::new(temp.path().into())),
+            GoslingMode::Auto,
+            true,
+            gosling::agents::GoslingPlatform::GoslingCli,
+        ));
+        let session = manager
+            .create_session(
+                temp.path().into(),
+                "Completed reply".into(),
+                gosling::session::SessionType::Hidden,
+                GoslingMode::Auto,
+            )
+            .await
+            .unwrap();
+        let mut cli = CliSession::new(
+            agent,
+            session.id.clone(),
+            false,
+            None,
+            None,
+            "json".into(),
+            false,
+        )
+        .await;
+        cli.messages
+            .push(Message::user().with_text("/clear").with_generated_id());
+        cli.process_agent_response(false, CancellationToken::new())
+            .await
+            .unwrap();
+        let stored = manager.get_session(&session.id, true).await.unwrap();
+        assert!(stored
+            .conversation
+            .unwrap()
+            .messages()
+            .iter()
+            .any(|message| message.as_concat_text() == "Conversation cleared"));
     }
 
     #[test]

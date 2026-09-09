@@ -1,4 +1,5 @@
 import { AppEvents } from '../constants/events';
+import { lastAssistantReplyId } from '../utils/sessionActivity';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { defineMessages, useIntl } from '../i18n';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -226,6 +227,8 @@ export default function BaseChat({
     handleSubmit,
   });
 
+  const lastReplyId = useMemo(() => lastAssistantReplyId(messages), [messages]);
+
   useEffect(() => {
     let streamState: 'idle' | 'loading' | 'streaming' | 'error' = 'idle';
     if (chatState === ChatState.LoadingConversation) {
@@ -247,10 +250,19 @@ export default function BaseChat({
           workspaceId: session?.workspace_id ?? null,
           streamState,
           messageCount: messages.length,
+          lastReplyId,
         },
       })
     );
-  }, [sessionId, session?.workspace_id, chatState, messages.length, promptError, sessionLoadError]);
+  }, [
+    sessionId,
+    session?.workspace_id,
+    chatState,
+    messages.length,
+    lastReplyId,
+    promptError,
+    sessionLoadError,
+  ]);
 
   // Generate command history from user messages (most recent first)
   const commandHistory = useMemo(() => {

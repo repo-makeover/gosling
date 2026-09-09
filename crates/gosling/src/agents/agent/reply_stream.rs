@@ -239,9 +239,13 @@ impl Agent {
                             );
                         }
                         Err(e) => {
+                            if is_token_cancelled(&cancel_token) {
+                                break;
+                            }
                             yield AgentEvent::Message(
                                 Message::assistant()
                                     .with_text(crate::context_mgmt::auto_compaction_failure_message(&e))
+                                    .with_terminal_error(e.to_string())
                             );
                             break;
                         }
@@ -836,6 +840,10 @@ impl Agent {
                                     break;
                                 }
                                 Err(e) => {
+                                    if is_token_cancelled(&cancel_token) {
+                                        exit_chat = true;
+                                        break;
+                                    }
                                     #[cfg(feature = "telemetry")]
                                     crate::posthog::emit_error("compaction_failed", &e.to_string());
                                     error!("Compaction failed: {}", e);

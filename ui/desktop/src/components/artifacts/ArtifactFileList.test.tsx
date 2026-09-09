@@ -93,7 +93,7 @@ describe('ArtifactFileList timestamps', () => {
 describe('ArtifactFileList deletion', () => {
   it('selects without opening files, supports select-all and clear, and opens only the row action', () => {
     render(<Harness />);
-    expect(screen.getByRole('button', { name: 'Delete selected' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Move selected to Trash' })).toBeDisabled();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select One' }));
     expect(screen.getByText('1 selected')).toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'Select all' })).toBePartiallyChecked();
@@ -109,7 +109,7 @@ describe('ArtifactFileList deletion', () => {
   it('confirms only the single row requested and leaves everything intact on cancel', () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete One' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move One to Trash' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Move 1 file to Trash?');
     expect(screen.getByRole('dialog')).toHaveTextContent('/reports/one.md');
     expect(screen.getByRole('dialog')).not.toHaveTextContent('/reports/two.md');
@@ -122,7 +122,7 @@ describe('ArtifactFileList deletion', () => {
   it('moves the selected batch in one request after one confirmation', async () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move selected to Trash' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Move 2 files to Trash?');
     fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
     await waitFor(() => expect(deleted).toHaveBeenCalledWith(files.map((file) => file.path)));
@@ -140,20 +140,22 @@ describe('ArtifactFileList deletion', () => {
     ]);
     render(<Harness />);
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move selected to Trash' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Trash unavailable');
     expect(deleted).toHaveBeenCalledWith([files[0].path]);
     expect(screen.getByRole('checkbox', { name: 'Select Two' })).toBeChecked();
     expect(toast.success).toHaveBeenCalledWith('1 file moved to Trash.');
-    expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('Unable to delete 1 file'));
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining('Unable to move 1 file to Trash')
+    );
   });
 
   it('retains the entire selection when IPC fails', async () => {
     trashArtifactFiles.mockRejectedValue(new Error('Connection lost'));
     render(<Harness />);
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move selected to Trash' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
     await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2));
     expect(deleted).not.toHaveBeenCalled();
@@ -164,7 +166,7 @@ describe('ArtifactFileList deletion', () => {
   it('separates already-missing results from files actually moved to Trash', async () => {
     trashArtifactFiles.mockResolvedValue([{ path: files[0].path, status: 'missing' }]);
     render(<Harness />);
-    fireEvent.click(screen.getByRole('button', { name: 'Delete One' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move One to Trash' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
     await waitFor(() => expect(deleted).toHaveBeenCalledWith([files[0].path]));
     expect(toast.success).not.toHaveBeenCalled();
@@ -180,7 +182,7 @@ describe('ArtifactFileList deletion', () => {
     );
     const view = render(<Harness />);
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select One' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move selected to Trash' }));
     fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
     expect(screen.getByRole('button', { name: 'Moving to Trash…' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Moving to Trash…' }));

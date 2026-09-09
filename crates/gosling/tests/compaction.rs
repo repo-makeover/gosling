@@ -280,6 +280,7 @@ struct ThresholdCompactionProvider {
     has_seen_compaction: Arc<AtomicBool>,
     first_call_total_tokens: i32,
     cancel_during_compaction: Option<tokio_util::sync::CancellationToken>,
+    fail_compaction: bool,
 }
 
 impl ThresholdCompactionProvider {
@@ -289,6 +290,7 @@ impl ThresholdCompactionProvider {
             has_seen_compaction: Arc::new(AtomicBool::new(false)),
             first_call_total_tokens: 5_000,
             cancel_during_compaction: None,
+            fail_compaction: false,
         }
     }
 
@@ -298,6 +300,7 @@ impl ThresholdCompactionProvider {
             has_seen_compaction: Arc::new(AtomicBool::new(false)),
             first_call_total_tokens: 110_000, // > 0.8 * 128_000 = 102_400
             cancel_during_compaction: None,
+            fail_compaction: false,
         }
     }
 }
@@ -315,6 +318,11 @@ impl Provider for ThresholdCompactionProvider {
 
         if is_compaction {
             self.has_seen_compaction.store(true, Ordering::SeqCst);
+            if self.fail_compaction {
+                return Err(ProviderError::Authentication(
+                    "compaction authentication failed".into(),
+                ));
+            }
             if let Some(cancel) = &self.cancel_during_compaction {
                 cancel.cancel();
             }
@@ -1312,5 +1320,153 @@ async fn canceled_auto_compaction_does_not_replace_history() -> Result<()> {
         .messages()
         .iter()
         .any(|message| message.as_concat_text() == "Keep this history 0"));
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn canceled_manual_compaction_does_not_replace_history() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let agent = Agent::new();
+    let session = setup_test_session(
+        &agent,
+        &temp_dir,
+        "cancel-manual",
+        vec![
+            Message::user().with_text("Keep this manual history"),
+            Message::assistant().with_text("Keep this reply"),
+        ],
+    )
+    .await?;
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let mut provider = ThresholdCompactionProvider::for_case1();
+    provider.cancel_during_compaction = Some(cancel.clone());
+    agent
+        .update_provider(
+            Arc::new(provider),
+            ModelConfig::new("mock-model"),
+            &session.id,
+        )
+        .await?;
+    let stream = agent
+        .reply(
+            Message::user().with_text("/compact"),
+            SessionConfig {
+                id: session.id.clone(),
+                max_turns: None,
+                compacted_context: false,
+                tail_limit: None,
+            },
+            Some(cancel.clone()),
+        )
+        .await?;
+    tokio::pin!(stream);
+    assert!(
+        stream.next().await.is_none(),
+        "a cancelled command must not publish completion"
+    );
+    let stored = agent
+        .config
+        .session_manager
+        .get_session(&session.id, true)
+        .await?;
+    let messages = stored.conversation.unwrap().messages().to_vec();
+    assert_eq!(messages.len(), 2);
+    assert!(messages.iter().all(Message::is_agent_visible));
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn failed_compaction_publishes_terminal_error_for_manual_and_automatic_paths() -> Result<()> {
+    let _threshold = pin_auto_compact_threshold();
+    for (name, input, first_call_total) in [
+        ("manual-error", "/compact", 5_000),
+        ("entry-error", "Continue", 110_000),
+        ("loop-error", "Continue", 5_000),
+    ] {
+        let temp_dir = TempDir::new()?;
+        let agent = Agent::new();
+        let session = setup_test_session_with_usage(
+            &agent,
+            &temp_dir,
+            name,
+            vec![
+                Message::user().with_text("Keep original history"),
+                Message::assistant().with_text("Original reply"),
+            ],
+            Usage::new(
+                Some(first_call_total - 100),
+                Some(100),
+                Some(first_call_total),
+            ),
+        )
+        .await?;
+        if name == "loop-error" {
+            agent
+                .set_goal(Some("Continue to the next model request".into()))
+                .await;
+        }
+        let mut provider = ThresholdCompactionProvider::for_case2();
+        provider.fail_compaction = true;
+        let seen = provider.has_seen_compaction.clone();
+        agent
+            .update_provider(
+                Arc::new(provider),
+                ModelConfig::new("mock-model"),
+                &session.id,
+            )
+            .await?;
+        let stream = agent
+            .reply(
+                Message::user().with_text(input),
+                SessionConfig {
+                    id: session.id.clone(),
+                    max_turns: Some(3),
+                    compacted_context: false,
+                    tail_limit: None,
+                },
+                None,
+            )
+            .await?;
+        tokio::pin!(stream);
+        let mut terminal_error = None;
+        while let Some(event) = stream.next().await {
+            match event? {
+                AgentEvent::Message(message) if message.metadata.terminal_error.is_some() => {
+                    terminal_error = message.metadata.terminal_error;
+                }
+                AgentEvent::HistoryReplaced(conversation) => {
+                    assert!(conversation
+                        .messages()
+                        .iter()
+                        .filter(|m| m.as_concat_text() == "Keep original history")
+                        .all(Message::is_agent_visible));
+                }
+                _ => {}
+            }
+        }
+        assert!(
+            seen.load(Ordering::SeqCst),
+            "{name} must exercise compaction"
+        );
+        assert!(
+            terminal_error
+                .as_deref()
+                .is_some_and(|e| e.contains("compaction authentication failed")),
+            "{name}: missing terminal error"
+        );
+        let stored = agent
+            .config
+            .session_manager
+            .get_session(&session.id, true)
+            .await?;
+        assert!(stored
+            .conversation
+            .unwrap()
+            .messages()
+            .iter()
+            .any(|m| m.as_concat_text() == "Keep original history" && m.is_agent_visible()));
+    }
     Ok(())
 }

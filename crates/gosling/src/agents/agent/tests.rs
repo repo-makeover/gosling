@@ -1684,3 +1684,18 @@ async fn policy_denial_preserves_inspector_reason() {
     assert!(text.contains("forbids mutation"));
     assert!(!text.contains("user has declined"));
 }
+
+#[test]
+fn turn_completion_distinguishes_lease_revocation_from_user_cancellation() {
+    let caller = CancellationToken::new();
+    let turn = caller.child_token();
+    assert!(Agent::ensure_turn_not_revoked(&Some(turn.clone()), &Some(caller.clone())).is_ok());
+    turn.cancel();
+    assert!(!caller.is_cancelled());
+    let error =
+        Agent::ensure_turn_not_revoked(&Some(turn.clone()), &Some(caller.clone())).unwrap_err();
+    assert!(error.to_string().contains("Session turn lease was lost"));
+    assert!(Agent::ensure_turn_not_revoked(&Some(turn.clone()), &None).is_err());
+    caller.cancel();
+    assert!(Agent::ensure_turn_not_revoked(&Some(turn), &Some(caller)).is_ok());
+}

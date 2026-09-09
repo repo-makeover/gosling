@@ -347,6 +347,9 @@ impl GoslingAcpAgent {
                             break;
                         }
                     }
+                    if stream_error.is_none() {
+                        stream_error = prompt_error_from_message(&message);
+                    }
                     if stream_error.is_some() {
                         break;
                     }

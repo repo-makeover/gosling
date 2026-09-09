@@ -154,6 +154,7 @@ export default function WorkingDirectoriesMenu({
         onSessionChange((current) => ({
           ...current,
           additional_working_dirs: result.additionalWorkingDirs,
+          workspace_folder_roots: result.workspaceFolderRoots ?? current.workspace_folder_roots,
         }));
       } catch (error) {
         console.error('[WorkingDirectoriesMenu] Failed to add working directory:', error);
@@ -174,6 +175,7 @@ export default function WorkingDirectoriesMenu({
         onSessionChange((current) => ({
           ...current,
           additional_working_dirs: result.additionalWorkingDirs,
+          workspace_folder_roots: result.workspaceFolderRoots ?? current.workspace_folder_roots,
         }));
       } catch (error) {
         console.error('[WorkingDirectoriesMenu] Failed to remove working directory:', error);

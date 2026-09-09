@@ -1,0 +1,56 @@
+{
+  "source_revision": "a48108750",
+  "audit_authority": "read_only",
+  "repair_authority": "parent delegated user-authorized patch/repair",
+  "checks": [
+    {
+      "command": "pnpm exec vitest run src/components/WorkingDirectoriesMenu.test.tsx src/main/fileIpc.test.ts",
+      "stage": "baseline",
+      "result": "3 tests passed"
+    },
+    {
+      "command": "pnpm exec vitest run src/main/fileIpc.test.ts src/components/WorkingDirectoriesMenu.test.tsx src/acp/__tests__/sessions.test.ts",
+      "stage": "post-repair",
+      "result": "18 tests passed; includes current roots, old-server roots preservation and real preload channel dispatch"
+    },
+    {
+      "command": "source bin/activate-hermit; just generate-acp-types",
+      "result": "passed; Rust core compiled and ACP schema/SDK generated from canonical DTO"
+    },
+    {
+      "command": "source bin/activate-hermit; cargo fmt",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "node Ajv validation using ui/node_modules/ajv and catalog finding_schema.json",
+      "result": "2 finding records validated"
+    },
+    {
+      "command": "parent union Desktop typecheck (first run)",
+      "result": "failed: test imported non-exported ElectronAPI; SDK dist lacked new field. Corrected test to Window[\"electron\"] and rebuilt SDK."
+    },
+    {
+      "command": "source bin/activate-hermit; pnpm --dir ui/sdk build",
+      "result": "passed; generated TS and tsc output dist; new workspaceFolderRoots present in dist/generated/types.gen.d.ts"
+    },
+    {
+      "command": "pnpm exec vitest run src/main/fileIpc.test.ts src/acp/__tests__/sessions.test.ts src/components/WorkingDirectoriesMenu.test.tsx",
+      "result": "18 passed after import correction; diff check passed"
+    }
+  ],
+  "pending_parent": [
+    "Rust acp::server::manage_sessions::tests and union Clippy",
+    "union Desktop tests/typecheck/lint/format"
+  ],
+  "limits": [
+    "No native packaged GUI run",
+    "No security audit",
+    "No full Rust suite",
+    "Catalog MCP cross-skill reads were denied; recovered via existing local filesystem",
+    "Host python lacks jsonschema; recovered via existing Ajv"
+  ]
+}

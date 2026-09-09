@@ -686,13 +686,21 @@ export const zAddSessionWorkingDirRequest_unstable = z.object({
     workingDir: z.string()
 });
 
+export const zWorkspaceFolderAccess = z.enum(['read', 'read_write']);
+
+export const zWorkspaceFolderPolicyRoot = z.object({
+    path: z.string(),
+    access: zWorkspaceFolderAccess
+});
+
 /**
  * The full set of directories a session has tool access to: the primary
  * `working_dir` plus every directory added via add/remove.
  */
 export const zSessionWorkingDirsResponse_unstable = z.object({
     workingDir: z.string(),
-    additionalWorkingDirs: z.array(z.string())
+    additionalWorkingDirs: z.array(z.string()),
+    workspaceFolderRoots: z.array(zWorkspaceFolderPolicyRoot).optional()
 });
 
 /**
@@ -2201,8 +2209,6 @@ export const zWorkspaceFolderKind = z.enum([
     'reference',
     'working'
 ]);
-
-export const zWorkspaceFolderAccess = z.enum(['read', 'read_write']);
 
 export const zWorkspaceFolder = z.object({
     id: z.string(),

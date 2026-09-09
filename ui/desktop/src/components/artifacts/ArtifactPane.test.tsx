@@ -19,6 +19,7 @@ import {
   getSelectedSessionInputs,
 } from '../../acp/sessionInputSelection';
 import { ArtifactPane } from './ArtifactPane';
+import { ARTIFACT_TIMESTAMPS_REFRESH_EVENT } from '../../types/artifactFileTimestamps';
 
 vi.mock('../../contexts/ArtifactRouterContext', () => ({ useArtifactRouter: vi.fn() }));
 vi.mock('../../acp/sessionLibraryInputs', () => ({
@@ -879,6 +880,150 @@ describe('ArtifactPane', () => {
       '2026-09-08T12:34:56Z'
     );
     expect(screen.getByText(/^Created:/)).toHaveAttribute('dateTime', '2026-08-01T12:00:00Z');
+  });
+
+  function TitleHarness() {
+    const { setVisibleSession, openFile } = useArtifactWorkbench();
+    return (
+      <>
+        {[
+          ['alpha', '1'],
+          ['beta', '1'],
+          ['beta', '2'],
+        ].map(([workspace, version]) => (
+          <button
+            key={`${workspace}-${version}`}
+            onClick={() =>
+              setVisibleSession(workspace, [
+                {
+                  sessionId: workspace,
+                  displayPath: 'report.md',
+                  resolvedPath: `/${workspace}/report.md`,
+                  baseWorkingDir: `/${workspace}`,
+                  relation: 'created',
+                  provenance: 'built_in_tool',
+                  firstSeenAt: '2026-09-08T10:00:00Z',
+                  lastSeenAt: `2026-09-08T10:00:0${version}Z`,
+                },
+              ])
+            }
+          >
+            Load {workspace} {version}
+          </button>
+        ))}
+        <button onClick={() => openFile('report.md', '/beta')}>Open relative report</button>
+        <ArtifactPane />
+      </>
+    );
+  }
+
+  it('keeps titles separate for identical display paths and reloads changed versions', async () => {
+    let betaTitle = 'Beta first';
+    readArtifactTitles.mockImplementation(
+      async (requests: Array<{ filePath: string; baseDirectory?: string }>) =>
+        Object.fromEntries(
+          requests.map(({ filePath, baseDirectory }) => [
+            filePath,
+            (baseDirectory ?? filePath).includes('alpha') ? 'Alpha report' : betaTitle,
+          ])
+        )
+    );
+    render(<TitleHarness />, {
+      wrapper: ({ children }) => (
+        <IntlTestWrapper>
+          <ArtifactWorkbenchProvider>{children}</ArtifactWorkbenchProvider>
+        </IntlTestWrapper>
+      ),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Load alpha 1' }));
+    expect(await screen.findByText('Alpha report')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Load beta 1' }));
+    expect(await screen.findByText('Beta first')).toBeInTheDocument();
+    expect(screen.queryByText('Alpha report')).not.toBeInTheDocument();
+    betaTitle = 'Beta rewritten';
+    fireEvent.click(screen.getByRole('button', { name: 'Load beta 2' }));
+    expect(await screen.findByText('Beta rewritten')).toBeInTheDocument();
+    expect(screen.queryByText('Beta first')).not.toBeInTheDocument();
+  });
+
+  it('refreshes a cached title after restore metadata refresh and window focus', async () => {
+    readArtifactTitles.mockResolvedValue({
+      '/beta/report.md': 'Initial title',
+      'report.md': 'Initial title',
+    });
+    render(<TitleHarness />, {
+      wrapper: ({ children }) => (
+        <IntlTestWrapper>
+          <ArtifactWorkbenchProvider>{children}</ArtifactWorkbenchProvider>
+        </IntlTestWrapper>
+      ),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Load beta 1' }));
+    expect(await screen.findByText('Initial title')).toBeInTheDocument();
+    readArtifactTitles.mockResolvedValue({
+      '/beta/report.md': 'Restored title',
+      'report.md': 'Restored title',
+    });
+    fireEvent(window, new Event(ARTIFACT_TIMESTAMPS_REFRESH_EVENT));
+    expect(await screen.findByText('Restored title')).toBeInTheDocument();
+    readArtifactTitles.mockResolvedValue({
+      '/beta/report.md': 'External title',
+      'report.md': 'External title',
+    });
+    fireEvent.focus(window);
+    expect(await screen.findByText('External title')).toBeInTheDocument();
+  });
+
+  it('ignores late title reads for a superseded inventory version', async () => {
+    let finishOld!: (titles: Record<string, string>) => void;
+    readArtifactTitles.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve;
+        })
+    );
+    readArtifactTitles.mockResolvedValue({ '/beta/report.md': 'Current title' });
+    render(<TitleHarness />, {
+      wrapper: ({ children }) => (
+        <IntlTestWrapper>
+          <ArtifactWorkbenchProvider>{children}</ArtifactWorkbenchProvider>
+        </IntlTestWrapper>
+      ),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Load beta 1' }));
+    await waitFor(() => expect(readArtifactTitles).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Load beta 2' }));
+    expect(await screen.findByText('Current title')).toBeInTheDocument();
+    await act(async () => finishOld({ '/beta/report.md': 'Obsolete title' }));
+    expect(screen.queryByText('Obsolete title')).not.toBeInTheDocument();
+    expect(screen.getByText('Current title')).toBeInTheDocument();
+  });
+
+  it('uses the canonical cached title for a relative preview after title refresh', async () => {
+    readArtifactFile.mockResolvedValue({
+      content: '# Original preview title',
+      encoding: 'utf8',
+      error: null,
+      found: true,
+      filePath: '/beta/report.md',
+      truncated: false,
+    });
+    readArtifactTitles.mockResolvedValue({ '/beta/report.md': 'Original cached title' });
+    render(<TitleHarness />, {
+      wrapper: ({ children }) => (
+        <IntlTestWrapper>
+          <ArtifactWorkbenchProvider>{children}</ArtifactWorkbenchProvider>
+        </IntlTestWrapper>
+      ),
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Load beta 1' }));
+    await screen.findByText('Original cached title');
+    fireEvent.click(screen.getByRole('button', { name: 'Open relative report' }));
+    expect(await screen.findByTitle('Original cached title')).toBeInTheDocument();
+    readArtifactTitles.mockResolvedValue({ '/beta/report.md': 'Restored cached title' });
+    fireEvent(window, new Event(ARTIFACT_TIMESTAMPS_REFRESH_EVENT));
+    expect(await screen.findByTitle('Restored cached title')).toBeInTheDocument();
+    expect(screen.queryByTitle('Original cached title')).not.toBeInTheDocument();
   });
 
   it('shows a document title above its file name in the Library list', async () => {

@@ -133,6 +133,16 @@ impl Agent {
         message_text: &str,
         session_id: &str,
     ) -> Result<Option<Message>> {
+        self.execute_command_with_cancel(message_text, session_id, None)
+            .await
+    }
+
+    pub(crate) async fn execute_command_with_cancel(
+        &self,
+        message_text: &str,
+        session_id: &str,
+        cancel_token: Option<&tokio_util::sync::CancellationToken>,
+    ) -> Result<Option<Message>> {
         let Some(parsed) = parse_slash_command(message_text) else {
             return Ok(None);
         };
@@ -153,7 +163,9 @@ impl Agent {
             Some(definition) => match definition.handler {
                 BuiltinCommand::Prompts => self.handle_prompts_command(&params, session_id).await,
                 BuiltinCommand::Prompt => self.handle_prompt_command(&params, session_id).await,
-                BuiltinCommand::Compact => self.handle_compact_command(session_id).await,
+                BuiltinCommand::Compact => {
+                    self.handle_compact_command(session_id, cancel_token).await
+                }
                 BuiltinCommand::Clear => self.handle_clear_command(session_id).await,
                 BuiltinCommand::Skills => self.handle_skills_command(session_id).await,
                 BuiltinCommand::Doctor => Ok(Some(crate::doctor::run(self, session_id).await?)),
@@ -168,7 +180,11 @@ impl Agent {
         }
     }
 
-    async fn handle_compact_command(&self, session_id: &str) -> Result<Option<Message>> {
+    async fn handle_compact_command(
+        &self,
+        session_id: &str,
+        cancel_token: Option<&tokio_util::sync::CancellationToken>,
+    ) -> Result<Option<Message>> {
         let provider = self.provider().await?;
         if provider.manages_own_context() {
             // Gosling's own message array is a display-only mirror for these providers
@@ -188,7 +204,11 @@ impl Agent {
             .ok_or_else(|| anyhow!("Session has no conversation"))?;
 
         let model_config = self.model_config_for_session(session_id).await?;
-        let (compacted_conversation, usage) = match compact_messages(
+        let cancellation = cancel_token.cloned().unwrap_or_default();
+        let result = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Ok(None),
+            result = compact_messages(
             provider.as_ref(),
             &model_config,
             session_id,
@@ -196,13 +216,21 @@ impl Agent {
             true, // is_manual_compact
             None,
         )
-        .await
-        {
+            => result,
+        };
+        // The provider may cancel while returning its final summary in the same poll.
+        if cancellation.is_cancelled() {
+            return Ok(None);
+        }
+        let (compacted_conversation, usage) = match result {
             Ok(result) => result,
             Err(error) => {
-                return Ok(Some(user_only_assistant_text(
-                    crate::context_mgmt::compaction_failure_message(&error),
-                )));
+                return Ok(Some(
+                    user_only_assistant_text(crate::context_mgmt::compaction_failure_message(
+                        &error,
+                    ))
+                    .with_terminal_error(error.to_string()),
+                ));
             }
         };
 

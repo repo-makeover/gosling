@@ -39,19 +39,19 @@
     "defaultMessage": "Created: {timestamp}"
   },
   "artifactFiles.delete": {
-    "defaultMessage": "Delete {name}"
+    "defaultMessage": "Move {name} to Trash"
   },
   "artifactFiles.deleteSelected": {
-    "defaultMessage": "Delete selected"
+    "defaultMessage": "Move selected to Trash"
   },
   "artifactFiles.deleting": {
     "defaultMessage": "Moving to Trash…"
   },
   "artifactFiles.description": {
-    "defaultMessage": "These files will be removed from their current locations. You can restore them from Trash. Other copies are kept."
+    "defaultMessage": "These files will be removed from their current locations. You can restore them from Trash. Other copies and saved revisions are kept. Removed Outputs remain available under Saved history for removed outputs."
   },
   "artifactFiles.failed": {
-    "defaultMessage": "{count,plural,one{Unable to delete # file. See the errors beside each item.} other{Unable to delete # files. See the errors beside each item.}}"
+    "defaultMessage": "{count,plural,one{Unable to move # file to Trash. See the errors beside each item.} other{Unable to move # files to Trash. See the errors beside each item.}}"
   },
   "artifactFiles.loadingTimes": {
     "defaultMessage": "Reading file timestamps…"
@@ -1922,8 +1922,11 @@
   "outputHistory.more": {
     "defaultMessage": "Load older revisions"
   },
+  "outputHistory.noRevisions": {
+    "defaultMessage": "No saved revisions"
+  },
   "outputHistory.note": {
-    "defaultMessage": "Observed changes identify the running agent, not exclusive authorship. Reading a file does not add authorship."
+    "defaultMessage": "Observed changes identify the running agent, not exclusive authorship. Reading a file does not add authorship. Revisions belong to this file path and remain after Trash or chat deletion; later authorized chats can access them."
   },
   "outputHistory.observed": {
     "defaultMessage": "Observed during tool execution"

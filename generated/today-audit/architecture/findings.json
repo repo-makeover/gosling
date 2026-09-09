@@ -1,0 +1,163 @@
+[
+  {
+    "id": "ARC-TODAY-001",
+    "title": "New artifact IPC commands bypass the shared channel contract",
+    "domain": "Architecture",
+    "severity": "Low",
+    "confidence": "Confirmed",
+    "evidence_basis": "source-evidenced",
+    "evidence": [
+      {
+        "file": ".architecture/invariants.yaml",
+        "lines": "20-30",
+        "quote": "rule: privileged renderer-to-main channels must be declared in a shared contract and preload may expose only handled methods"
+      },
+      {
+        "file": "ui/desktop/src/preload.ts",
+        "lines": "250-265",
+        "quote": "ipcRenderer.invoke('copy-artifact-contents', filePath, baseDirectory)",
+        "note": "Today's copy, timestamp, repository-classification and Trash methods repeat channel literals."
+      },
+      {
+        "file": "ui/desktop/src/main/fileIpc.ts",
+        "lines": "58-74",
+        "quote": "export const FILE_IPC_CHANNELS = [",
+        "note": "Channel inventory resides in Electron main implementation; preload does not consume it."
+      },
+      {
+        "file": "ui/desktop/src/ipc/channels.ts",
+        "lines": "19-28",
+        "quote": "export const desktopCommandChannels = {",
+        "note": "Shared command registry omits today's four artifact commands."
+      },
+      {
+        "file": "ui/desktop/src/main/fileIpc.test.ts",
+        "lines": "10-26",
+        "quote": "expect(handle.mock.calls.map(([channel]) => channel)).toEqual(FILE_IPC_CHANNELS);",
+        "note": "Registration parity checks main-owned inventory only; preload side is outside check."
+      }
+    ],
+    "observed": "Today's four artifact IPC commands each have a live main handler and preload caller, but their channel names are duplicated literals instead of being declared and consumed from the shared IPC contract.",
+    "expected_boundary": "Active ARC-003 requires privileged renderer-to-main channels to be declared in a shared contract.",
+    "failure_mechanism": "The new features extended the implementation-owned FILE_IPC_CHANNELS list and preload literals while bypassing ipc/channels.ts. Main-side registration tests cannot enforce producer/consumer channel parity.",
+    "break_it_angle": "Compare the producer, receiving handler, shared registry and registration test rather than treating a main-only channel inventory as a shared contract.",
+    "impact": "Confirmed architectural invariant drift with a missing compile-time rename boundary. No current channel mismatch, privilege defect, or runtime failure is claimed.",
+    "operational_impact": {
+      "blast_radius": "Local",
+      "side_effect_class": "none",
+      "reversibility": "reversible",
+      "operator_visibility": "silent",
+      "rerun_safety": "safe"
+    },
+    "mitigation": {
+      "patterns": [
+        "shared channel constant"
+      ],
+      "minimal_repair": "Declare the four newly added command names in ipc/channels.ts and consume those constants in preload, main registration and FILE_IPC_CHANNELS.",
+      "local_guardrail": "Keep the shared contract import renderer-safe; no Electron main implementation imports in preload.",
+      "behavior_test": "Exercise the actual preload methods against a stub IPC bridge and verify each selected channel resolves to its registered main handler."
+    },
+    "implementation_assessment": {
+      "complexity": "local_guardrail",
+      "cost": "S",
+      "nominal_agent": "codex",
+      "rationale": "A bounded constant extraction across existing main/preload/contract files preserves the existing payload and runtime behavior.",
+      "cost_drivers": [
+        "modules",
+        "tests"
+      ]
+    },
+    "validation": [
+      "Static comparison confirms all four current handlers exist and match the caller literals.",
+      "After repair run targeted file IPC/preload tests and Desktop typecheck; no runtime behavior change expected."
+    ],
+    "non_goals": [
+      "No security audit or access-policy changes.",
+      "Do not sweep older IPC literals or redesign the whole IPC layer."
+    ],
+    "confidence_calibration": {
+      "static_property_confirmed": true,
+      "runtime_manifestation_observed": false,
+      "confidence_ceiling_applied": "none",
+      "rationale": "Explicit active invariant versus quoted implementation; current behavior is matched, impact is governance and drift resistance only."
+    }
+  },
+  {
+    "id": "ARC-TODAY-002",
+    "title": "Directory mutation response omits updated workspace folder policy",
+    "domain": "Architecture",
+    "severity": "Low",
+    "confidence": "Confirmed",
+    "evidence_basis": "source-evidenced",
+    "evidence": [
+      {
+        "file": "ui/desktop/src/components/WorkingDirectoriesMenu.tsx",
+        "lines": "151-157",
+        "quote": "additional_working_dirs: result.additionalWorkingDirs,",
+        "note": "Baseline a48108750: mutation applies path list only."
+      },
+      {
+        "file": "ui/desktop/src/components/WorkingDirectoriesMenu.tsx",
+        "lines": "220-236",
+        "quote": "const roots = session.workspace_folder_roots ?? [];",
+        "note": "Baseline a48108750: added roots absent from metadata select generic Workspace policy label."
+      },
+      {
+        "file": "crates/gosling/src/acp/server/manage_sessions.rs",
+        "lines": "143-152",
+        "quote": "let workspace_context = workspace_context_with_added_root(&session, &path);",
+        "note": "Baseline: backend saves extended policy while response contains only directory lists."
+      },
+      {
+        "file": "crates/gosling-sdk-types/src/custom_requests.rs",
+        "lines": "132-135",
+        "quote": "pub additional_working_dirs: Vec<String>,",
+        "note": "Baseline SessionWorkingDirsResponse contains no policy-root projection."
+      }
+    ],
+    "observed": "Adding a directory to an active workspace session persists its effective folder policy but returns and applies only the directory paths. The new directory is listed immediately with a generic Workspace policy label until a full session reload.",
+    "expected_boundary": "Core owns canonical workspace policy, and Desktop presents its current response metadata rather than independently inferring policy.",
+    "failure_mechanism": "The new access-label consumer was wired to full session metadata without extending the existing mutation response and adapter.",
+    "break_it_angle": "Trace add-directory through backend context write, typed response, Desktop adapter and rendered label before any full session reload.",
+    "impact": "Low-impact stale access display for the newly granted folder; actual access policy and existing read-only roots are unchanged.",
+    "operational_impact": {
+      "blast_radius": "Local",
+      "side_effect_class": "user-visible",
+      "reversibility": "reversible",
+      "operator_visibility": "UI-visible",
+      "rerun_safety": "safe"
+    },
+    "mitigation": {
+      "patterns": [
+        "authoritative mutation projection"
+      ],
+      "minimal_repair": "Include effective workspace roots in the directory mutation response and propagate them through adapter and component state, preserving old-server fallback.",
+      "local_guardrail": "Reuse canonical WorkspaceFolderPolicyRoot; keep existing policy/persistence and extension-refresh rollback unchanged.",
+      "behavior_test": "After adding a workspace directory, render updated state without reload and assert Read/write/run rather than Workspace policy; retain read-only overlap labels."
+    },
+    "implementation_assessment": {
+      "complexity": "operator_ux",
+      "cost": "S",
+      "nominal_agent": "codex",
+      "rationale": "Small metadata addition crosses Rust DTO/generated SDK and existing Desktop adapter; no new permission behavior or persistence.",
+      "cost_drivers": [
+        "modules",
+        "tests"
+      ]
+    },
+    "validation": [
+      "Static baseline producer/consumer trace proves omitted policy projection.",
+      "Regression tests should cover new grant response, old-server omission, existing read-only roots and immediate rendered label."
+    ],
+    "non_goals": [
+      "No access-policy changes.",
+      "No workspace mutation/removal or default-session changes."
+    ],
+    "confidence_calibration": {
+      "static_property_confirmed": true,
+      "runtime_manifestation_observed": false,
+      "confidence_ceiling_applied": "none",
+      "rationale": "Deterministic omitted metadata and fallback label; no race or permission effect claimed."
+    }
+  }
+]

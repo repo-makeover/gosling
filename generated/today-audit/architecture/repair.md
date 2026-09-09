@@ -1,0 +1,25 @@
+# Architecture repair checkpoint
+
+Date: 2026-09-08. Skill: repair-defect-patchset. Parent authorized repair following frozen independent architecture scan. Source HEAD a48108750; parent/other agents now edit separate surfaces. Preserve their changes. Audit output remains historical; parent owns aggregate docs/session log.
+
+Supplied scope: two Low/P3 defects: ARC-TODAY-001 (shared IPC command registry, low complexity); directory policy response/UI metadata propagation (workflow stub, medium complexity). Parent also requested currentHash comment correction for dataflow's separately owned missing/unreadable snapshot repair; no schema shape change there.
+
+Stage 1: Extend SessionWorkingDirsResponse with optional-by-serialization effective workspace folder roots (empty vector omitted; serde default handles old peers). Populate authoritative roots from the saved workspace context for add/remove, preserve through Desktop adapter, update component state, test immediately visible grant labels and read-only overlap. Baseline: backend already saves policy but response returns only dirs; UI retains stale roots. Files: SDK DTO, ACP manage_sessions helper/callers/tests, Desktop sessions adapter/types as needed, WorkingDirectoriesMenu/test, generated schema/SDK. Existing directory validation, persistence, extension refresh and rollback ordering remain intact.
+
+Stage 2: Put the four new artifact command constants into existing ipc/channels.ts; replace only those literals in preload and main/fileIpc plus add bridge contract regression. Baseline literals match today; defect is explicit registry ARC-003 violation, not runtime dispatch. No policy/payload/handler behavior changes. Other existing IPC literals excluded.
+
+No cross-stage dependency. SDK generation follows DTO and dataflow comment edits. Bound tests: existing focused Vitest baseline, Rust working-dir helper unit tests, Desktop affected tests/typecheck, schema/SDK generation, formatter and lint checks. Parent coordinates aggregate Rust validation and documentation. Shared architecture declarations: AGENTS, .architecture/invariants ARC-003, docs/architecture, ADR-0017/0018, existing canonical workspace DTO and generated schema. Baseline drift: explicit IPC violation and stale directory display. Expected delta: no new drift, backward-compatible metadata addition only.
+
+## Results and closure handoff
+
+Stage 1 implemented: authoritative effective roots added to directory mutation response with serde default/empty omission; schema and SDK regenerated. Main policy/persistence/extension update/rollback order unchanged. Desktop adapter and state update carry roots with old-server fallback. Tests assert new grant response and read-only policy unchanged, immediate access label and preservation of prior roots when an older response omits metadata. Stage 2 implemented: four new artifact channels consume shared command constants in preload and handler registry. Regression imports the actual preload and checks invoked channels match live registered names. Trash handler indentation changed only because the longer constant causes formatter wrapping; no handler behavior was edited.
+
+Baseline: 3/3 focused UI tests. Final focused UI: 18/18 across WorkingDirectoriesMenu, ACP sessions and file IPC. Canonical just generate-acp-types succeeded (Rust core compiled). cargo fmt and git diff --check passed. Ajv validated both emitted findings against the catalog schema. Exact checks recorded in validation.json. Parent owns pending union Rust tests/Clippy and Desktop full suite/typecheck/lint; no duplicate full checks launched.
+
+Gate 8: re-traced add request -> canonical context -> persisted update -> response -> generated DTO -> adapter -> component render. Add validation, rollback and existing read-only behavior unchanged. Traced preload -> shared channel -> main handler; all four payloads unchanged. No service ownership or access decision migrated. CurrentHash comment now matches dataflow repair's broader unavailable-safe-snapshot result without a schema shape change. Gate 9: checked both finding IDs against original trigger and regression; no stale TODO/FIXME/HACK/XXX markers found in repaired implementations. No unrelated drift correction or security audit performed.
+
+Status: completed_with_partial_verification pending parent's union checks. Source report retained with dated addendum; parent will reconcile aggregate report and docs/logs/session/2026-09-08-evening-audit-repairs.md. Architecture delta: no new drift; ARC-003 repaired on the four newly added channels; backward-compatible policy metadata projection repair complete. No live environment deployment claimed.
+
+## Union typecheck correction
+
+Parent first union typecheck identified a non-exported ElectronAPI import in the new test and stale built SDK declarations. Fixed test annotation to existing authoritative Window['electron']; no API export added. Ran pnpm --dir ui/sdk build successfully to generate and compile the SDK dist. Re-ran three targeted suites: 18/18 passed. git diff --check passed. Parent final union typecheck remains the closing compiler gate.

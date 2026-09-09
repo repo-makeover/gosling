@@ -1279,3 +1279,20 @@ fn test_gosling_custom_notifications_capability_reads_client_meta() {
         gosling_client_capabilities.as_ref()
     ));
 }
+
+#[test]
+fn terminal_message_metadata_maps_to_prompt_failure() {
+    let ordinary = Message::assistant().with_text("Compaction complete");
+    assert!(prompt_error_from_message(&ordinary).is_none());
+    let failed = Message::assistant()
+        .with_text("Could not compact")
+        .with_terminal_error("provider unavailable");
+    assert_eq!(
+        prompt_error_from_message(&failed).unwrap().message,
+        "provider unavailable"
+    );
+    let credits =
+        failed.with_system_notification(SystemNotificationType::CreditsExhausted, "Add credits");
+    let error = serde_json::to_value(prompt_error_from_message(&credits).unwrap()).unwrap();
+    assert_eq!(error["data"]["reason"], "credits_exhausted");
+}

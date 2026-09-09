@@ -159,6 +159,7 @@ impl Agent {
         // is a child of the caller's, so an explicit cancel still propagates,
         // and it additionally fires if another process takes this session's
         // turn lease over (REL-GSL-005).
+        let caller_cancel_token = cancel_token;
         let cancel_token = Some(turn_lease.turn_cancel_token());
 
         let message_text = user_message.as_concat_text();
@@ -187,8 +188,13 @@ impl Agent {
         }
 
         let command_result = self
-            .execute_command(&message_text, &session_config.id)
+            .execute_command_with_cancel(&message_text, &session_config.id, cancel_token.as_ref())
             .await;
+
+        if is_token_cancelled(&cancel_token) {
+            Self::ensure_turn_not_revoked(&cancel_token, &caller_cancel_token)?;
+            return Ok(Box::pin(stream::empty()));
+        }
 
         let mut command_preamble: Vec<AgentEvent> = Vec::new();
 
@@ -196,6 +202,7 @@ impl Agent {
             Err(e) => {
                 let error_message = Message::assistant()
                     .with_text(e.to_string())
+                    .with_terminal_error(e.to_string())
                     .with_visibility(true, false);
                 return Ok(Box::pin(stream::once(async move {
                     Ok(AgentEvent::Message(error_message))
@@ -394,20 +401,38 @@ impl Agent {
                         compacted_conversation
                     }
                     Err(e) => {
+                        if is_token_cancelled(&cancel_token) {
+                            Self::ensure_turn_not_revoked(&cancel_token, &caller_cancel_token)?;
+                            return;
+                        }
                         yield AgentEvent::Message(
                             Message::assistant()
                                 .with_text(crate::context_mgmt::auto_compaction_failure_message(&e))
+                                .with_terminal_error(e.to_string())
                         );
                         return;
                     }
                 }
             };
 
-            let mut reply_stream = self.reply_internal(final_conversation, session_config, session, cancel_token).await?;
+            let mut reply_stream = self.reply_internal(final_conversation, session_config, session, cancel_token.clone()).await?;
             while let Some(event) = reply_stream.next().await {
                 yield event?;
             }
+            Self::ensure_turn_not_revoked(&cancel_token, &caller_cancel_token)?;
         }))
+    }
+
+    pub(super) fn ensure_turn_not_revoked(
+        turn_cancel_token: &Option<CancellationToken>,
+        caller_cancel_token: &Option<CancellationToken>,
+    ) -> Result<()> {
+        // Lease loss cancels only the child token. Callers cannot observe it as a user cancel.
+        anyhow::ensure!(
+            !is_token_cancelled(turn_cancel_token) || is_token_cancelled(caller_cancel_token),
+            "Session turn lease was lost; this turn stopped before completion. Reload the session before retrying."
+        );
+        Ok(())
     }
 
     pub(super) async fn perform_compact(

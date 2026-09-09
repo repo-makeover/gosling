@@ -1,0 +1,20 @@
+{
+  "ARC-TODAY-001": {
+    "aid_code": "AID-014",
+    "composite_label": "AID-014/ARC-003/desktop.ipc_contract",
+    "invariant_id": "ARC-003",
+    "node_ids": [
+      "desktop.ipc_contract"
+    ],
+    "trace_basis": "declared",
+    "confidence_caps": []
+  },
+  "ARC-TODAY-002": {
+    "aid_code": "AID-009",
+    "composite_label": "AID-009/workspace-policy-projection/desktop.working_dirs",
+    "invariant_id": "workspace-policy-projection",
+    "node_ids": ["desktop.working_dirs", "acp.manage_sessions"],
+    "trace_basis": "declared",
+    "confidence_caps": []
+  }
+}

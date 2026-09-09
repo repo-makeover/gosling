@@ -180,6 +180,9 @@ missing file can be exported from history but is not recreated by restore. After
 before using **Restore revision**. Saved history belongs to the path and can be available to later
 authorized chats that register that same path.
 
+Saved revisions can also be exported when the current file is unreadable or exceeds the
+8 MiB snapshot limit. Restore stays disabled until gosling can safely read the current file.
+
 Markdown reports in configured output folders or the working directory's `Outputs` folder also
 contain a contribution-history footer. Other formats retain their contents. History begins with new
 successful changes made through gosling's hosted tools; externally executed agents and edits made

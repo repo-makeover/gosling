@@ -946,3 +946,292 @@ async fn per_file_storage_failure_does_not_abort_other_revisions() {
     assert!(error.to_string().contains("per-file storage failure"));
     assert_eq!(fixture.history().await.len(), 1);
 }
+
+#[tokio::test]
+async fn saved_revision_remains_available_when_live_file_exceeds_capture_limit() {
+    let fixture = Fixture::new().await;
+    fixture
+        .write(&fixture.session, "first", "model", "Original")
+        .await;
+    let saved = fixture.get(1).await;
+    let expected_hash = saved.current_hash.clone().unwrap();
+    let oversized = vec![b'x'; 8 * 1024 * 1024 + 1];
+    fs::write(&fixture.path, &oversized).unwrap();
+
+    let fetched = fixture.get(1).await;
+    assert_eq!(fetched.content_base64, saved.content_base64);
+    assert_eq!(fetched.revision, saved.revision);
+    assert!(fetched.current_hash.is_none());
+    assert!(fixture
+        .manager
+        .restore_output_revision(RestoreOutputRevisionRequest {
+            session_id: fixture.session.id.clone(),
+            path: fixture.path.to_string_lossy().into(),
+            version: 1,
+            expected_current_hash: expected_hash,
+        })
+        .await
+        .is_err());
+    assert_eq!(fs::read(&fixture.path).unwrap(), oversized);
+    assert_eq!(fixture.history().await.len(), 1);
+}
+
+#[tokio::test]
+async fn skipped_preimage_does_not_acquire_authorship_when_capture_budget_frees_up() {
+    let fixture = Fixture::new().await;
+    let root = fixture.path.parent().unwrap();
+    let target = root.join("a.txt");
+    for name in ["a.txt", "b.txt", "c.txt", "d.txt"] {
+        fs::write(root.join(name), vec![b'x'; 8 * 1024 * 1024]).unwrap();
+    }
+    let untouched = root.join("z.md");
+    fs::write(&untouched, "Human document").unwrap();
+    let call = CallToolRequestParams::new("developer__write")
+        .with_arguments(rmcp::object!({"path": target.to_string_lossy()}));
+    let capture = fixture
+        .prepare(&fixture.session, "shrink", "model", &call)
+        .await;
+    fs::write(&target, "Small replacement").unwrap();
+    let error = fixture
+        .manager
+        .finish_output_capture(capture, &CallToolResult::success(vec![]))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("32 MiB"));
+    assert_eq!(fs::read_to_string(&untouched).unwrap(), "Human document");
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        fixture
+            .temp
+            .path()
+            .join("state/sessions/sessions.db")
+            .display()
+    ))
+    .await
+    .unwrap();
+    for table in ["output_revisions", "session_artifacts"] {
+        let path_column = if table == "output_revisions" {
+            "path"
+        } else {
+            "resolved_path"
+        };
+        let count: i64 = sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) FROM {table} WHERE {path_column} = ?"
+        ))
+        .bind(untouched.to_string_lossy().as_ref())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            count, 0,
+            "unchanged unobserved files must not enter {table}"
+        );
+    }
+    let history = fixture
+        .manager
+        .list_output_revisions(ListOutputRevisionsRequest {
+            session_id: fixture.session.id.clone(),
+            path: target.to_string_lossy().into(),
+            before_version: None,
+            limit: None,
+        })
+        .await
+        .unwrap()
+        .revisions;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].action, OutputRevisionAction::Modified);
+    assert_eq!(history[1].action, OutputRevisionAction::Baseline);
+}
+
+#[tokio::test]
+async fn incomplete_scan_preserves_known_creation_without_crediting_unknown_preimages() {
+    let fixture = Fixture::new().await;
+    fs::create_dir_all(
+        fixture
+            .path
+            .parent()
+            .unwrap()
+            .join("one/two/three/four/five"),
+    )
+    .unwrap();
+    let call = CallToolRequestParams::new("developer__write")
+        .with_arguments(rmcp::object!({"path": fixture.path.to_string_lossy()}));
+    let capture = fixture
+        .prepare(&fixture.session, "known-create", "model", &call)
+        .await;
+    let unknown = fixture.path.with_file_name("unknown.md");
+    fs::write(&fixture.path, "Explicitly created").unwrap();
+    fs::write(&unknown, "Uncertain origin").unwrap();
+    let error = fixture
+        .manager
+        .finish_output_capture(capture, &CallToolResult::success(vec![]))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("four directory levels"));
+    assert_eq!(fs::read_to_string(&unknown).unwrap(), "Uncertain origin");
+    let history = fixture.history().await;
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].action, OutputRevisionAction::Created);
+    assert_eq!(history[0].attribution, OutputAttributionKind::Tool);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn recovered_preimage_permissions_do_not_invent_output_authorship() {
+    use std::os::unix::fs::PermissionsExt;
+
+    struct RestorePermissions(PathBuf, fs::Permissions);
+    impl Drop for RestorePermissions {
+        fn drop(&mut self) {
+            fs::set_permissions(&self.0, self.1.clone()).unwrap();
+        }
+    }
+
+    for blocked_workspace in [true, false] {
+        let fixture = Fixture::new().await;
+        let (target, blocked_directory, call) = if blocked_workspace {
+            (
+                fixture.path.clone(),
+                fixture.session.working_dir.clone(),
+                CallToolRequestParams::new("developer__shell")
+                    .with_arguments(rmcp::object!({"command": "python generate_report.py"})),
+            )
+        } else {
+            let directory = fixture.session.working_dir.join("documents");
+            fs::create_dir(&directory).unwrap();
+            let target = directory.join("untouched.md");
+            let call = CallToolRequestParams::new("developer__write")
+                .with_arguments(rmcp::object!({"path": target.to_string_lossy()}));
+            (target, directory, call)
+        };
+        fs::write(&target, "Original human document").unwrap();
+        let restore = RestorePermissions(
+            blocked_directory.clone(),
+            fs::metadata(&blocked_directory).unwrap().permissions(),
+        );
+        fs::set_permissions(&blocked_directory, fs::Permissions::from_mode(0o000)).unwrap();
+        let capture = fixture
+            .prepare(&fixture.session, "permission-recovery", "model", &call)
+            .await;
+        drop(restore);
+        let result = fixture
+            .manager
+            .finish_output_capture(capture, &CallToolResult::success(vec![]))
+            .await;
+        assert!(
+            result.is_err(),
+            "incomplete pre-observation must be reported"
+        );
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "Original human document"
+        );
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            fixture
+                .temp
+                .path()
+                .join("state/sessions/sessions.db")
+                .display()
+        ))
+        .await
+        .unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM output_revisions WHERE path = ?")
+            .bind(target.to_string_lossy().as_ref())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+}
+
+#[tokio::test]
+async fn newly_created_output_parent_remains_captureable() {
+    let fixture = Fixture::new().await;
+    let target = fixture.path.parent().unwrap().join("new/report.md");
+    let call = CallToolRequestParams::new("developer__write")
+        .with_arguments(rmcp::object!({"path": target.to_string_lossy()}));
+    let capture = fixture
+        .prepare(&fixture.session, "new-parent", "model", &call)
+        .await;
+    fs::create_dir(target.parent().unwrap()).unwrap();
+    fs::write(&target, "New output").unwrap();
+    fixture
+        .manager
+        .finish_output_capture(capture, &CallToolResult::success(vec![]))
+        .await
+        .unwrap();
+    let history = fixture
+        .manager
+        .list_output_revisions(ListOutputRevisionsRequest {
+            session_id: fixture.session.id.clone(),
+            path: target.to_string_lossy().into(),
+            before_version: None,
+            limit: None,
+        })
+        .await
+        .unwrap()
+        .revisions;
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].action, OutputRevisionAction::Created);
+    assert_eq!(history[0].attribution, OutputAttributionKind::Tool);
+}
+
+#[tokio::test]
+async fn excluded_read_only_output_does_not_suppress_new_shell_output() {
+    use gosling_sdk_types::workspace::{
+        ProductOutputFolder, WorkspaceFolderAccess, WorkspaceFolderPolicy,
+        WorkspaceFolderPolicyRoot, WorkspaceSessionContext,
+    };
+
+    let fixture = Fixture::new().await;
+    let read_only = fixture.session.working_dir.join("ReferenceOutputs");
+    fs::create_dir(&read_only).unwrap();
+    let reference = read_only.join("reference.md");
+    fs::write(&reference, "Read-only reference").unwrap();
+    let mut scope = fixture.session.clone();
+    scope.workspace_context = Some(WorkspaceSessionContext {
+        product_output_folders: vec![ProductOutputFolder {
+            path: read_only.to_string_lossy().into(),
+            ..Default::default()
+        }],
+        folder_policy: WorkspaceFolderPolicy {
+            roots: vec![
+                WorkspaceFolderPolicyRoot {
+                    path: scope.working_dir.to_string_lossy().into(),
+                    access: WorkspaceFolderAccess::ReadWrite,
+                },
+                WorkspaceFolderPolicyRoot {
+                    path: read_only.to_string_lossy().into(),
+                    access: WorkspaceFolderAccess::Read,
+                },
+            ],
+        },
+        ..Default::default()
+    });
+    let call = CallToolRequestParams::new("developer__shell")
+        .with_arguments(rmcp::object!({"command": "python generate_report.py"}));
+    let capture = fixture.prepare(&scope, "shell", "model", &call).await;
+    fs::write(&fixture.path, "New shell output").unwrap();
+    fixture
+        .manager
+        .finish_output_capture(capture, &CallToolResult::success(vec![]))
+        .await
+        .unwrap();
+    assert_eq!(
+        fs::read_to_string(&reference).unwrap(),
+        "Read-only reference"
+    );
+    let history = fixture.history().await;
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].action, OutputRevisionAction::Created);
+    assert_eq!(history[0].attribution, OutputAttributionKind::Observed);
+    let artifacts = fixture
+        .manager
+        .list_session_artifacts(&fixture.session.id, None, 20)
+        .await
+        .unwrap()
+        .artifacts;
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0].resolved_path, fixture.path.to_string_lossy());
+}

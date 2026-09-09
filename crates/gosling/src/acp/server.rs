@@ -161,8 +161,8 @@ use initialization::{
 use message_projection::{
     build_tool_call_content, extract_tool_call_update_meta, extract_tool_raw_output,
     merge_replay_message_meta, message_update_meta, outcome_to_confirmation,
-    prompt_error_from_message_content, replay_message_meta, send_status_message_update,
-    session_artifact_dto,
+    prompt_error_from_message, prompt_error_from_message_content, replay_message_meta,
+    send_status_message_update, session_artifact_dto,
 };
 use tool_metadata::{
     extend_chain_membership, extract_locations_from_meta, extract_tool_locations, format_tool_name,

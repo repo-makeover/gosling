@@ -2045,6 +2045,12 @@
           "items": {
             "type": "string"
           }
+        },
+        "workspaceFolderRoots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkspaceFolderPolicyRoot"
+          }
         }
       },
       "required": [
@@ -2053,6 +2059,28 @@
       ],
       "description": "The full set of directories a session has tool access to: the primary\n`working_dir` plus every directory added via add/remove.",
       "x-side": "agent"
+    },
+    "WorkspaceFolderPolicyRoot": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "access": {
+          "$ref": "#/$defs/WorkspaceFolderAccess"
+        }
+      },
+      "required": [
+        "path",
+        "access"
+      ]
+    },
+    "WorkspaceFolderAccess": {
+      "type": "string",
+      "enum": [
+        "read",
+        "read_write"
+      ]
     },
     "RemoveSessionWorkingDirRequest_unstable": {
       "type": "object",
@@ -5509,7 +5537,7 @@
             "string",
             "null"
           ],
-          "description": "SHA-256 of all current on-disk bytes, including the footer; absent if missing."
+          "description": "SHA-256 of all current on-disk bytes, including the footer; absent if a safe snapshot is unavailable."
         }
       },
       "required": [
@@ -6634,13 +6662,6 @@
         "source",
         "reference",
         "working"
-      ]
-    },
-    "WorkspaceFolderAccess": {
-      "type": "string",
-      "enum": [
-        "read",
-        "read_write"
       ]
     },
     "ProductOutputFolder": {

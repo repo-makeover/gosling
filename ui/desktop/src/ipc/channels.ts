@@ -17,6 +17,10 @@ export interface UpdaterEvent {
 }
 
 export const desktopCommandChannels = {
+  copyArtifactContents: 'copy-artifact-contents',
+  classifyArtifactRepositories: 'classify-artifact-repositories',
+  getArtifactFileTimestamps: 'get-artifact-file-timestamps',
+  trashArtifactFiles: 'trash-artifact-files',
   reactReady: 'react-ready',
   createChatWindow: 'create-chat-window',
   broadcastThemeChange: 'broadcast-theme-change',

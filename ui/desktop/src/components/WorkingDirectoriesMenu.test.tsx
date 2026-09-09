@@ -72,6 +72,11 @@ describe('WorkingDirectoriesMenu workspace session grants', () => {
     );
     const update = onSessionChange.mock.calls[0][0] as (session: Session) => Session;
     expect(update(workspaceSession).additional_working_dirs).toEqual(['/private/workshop']);
+    const current = {
+      ...workspaceSession,
+      workspace_folder_roots: [{ path: '/reference', access: 'read' as const }],
+    };
+    expect(update(current).workspace_folder_roots).toEqual(current.workspace_folder_roots);
   });
 
   it('shows pinned read-only folder access', async () => {
@@ -93,5 +98,33 @@ describe('WorkingDirectoriesMenu workspace session grants', () => {
     await user.click(screen.getByRole('button', { name: /Dirs/ }));
     expect(await screen.findByText('Read-only')).toBeInTheDocument();
     expect(screen.getByText('Primary · Read/write/run')).toBeInTheDocument();
+  });
+
+  it('shows authoritative access immediately after adding a workspace directory', async () => {
+    const user = userEvent.setup();
+    const roots = [
+      { path: '/workspace/project', access: 'read_write' as const },
+      { path: '/private/workshop', access: 'read_write' as const },
+    ];
+    addSessionWorkingDir.mockResolvedValue({
+      workingDir: '/workspace/project',
+      additionalWorkingDirs: ['/private/workshop'],
+      workspaceFolderRoots: roots,
+    });
+    const onSessionChange = vi.fn();
+    const { rerender } = render(
+      <WorkingDirectoriesMenu session={workspaceSession} onSessionChange={onSessionChange} />,
+      { wrapper: IntlTestWrapper }
+    );
+    await user.click(screen.getByRole('button', { name: /Add Dir/ }));
+    await user.click(await screen.findByText('Add directory…'));
+    await waitFor(() => expect(onSessionChange).toHaveBeenCalled());
+    const update = onSessionChange.mock.calls[0][0] as (session: Session) => Session;
+    const updated = update(workspaceSession);
+    expect(updated.workspace_folder_roots).toEqual(roots);
+    rerender(<WorkingDirectoriesMenu session={updated} onSessionChange={onSessionChange} />);
+    await user.click(screen.getByRole('button', { name: /Dirs/ }));
+    expect(await screen.findByText('Read/write/run')).toBeInTheDocument();
+    expect(screen.queryByText('Workspace policy')).not.toBeInTheDocument();
   });
 });

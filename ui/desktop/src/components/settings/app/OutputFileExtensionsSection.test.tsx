@@ -23,17 +23,17 @@ describe('OutputFileExtensionsSection', () => {
 
     expect(await screen.findByText('.docx')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Add file extensions'), {
-      target: { value: '.CSV .md' },
+      target: { value: '.XML .md' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 
     await waitFor(() =>
       expect(window.electron.setSetting).toHaveBeenCalledWith('outputFileExtensions', [
         ...defaultOutputFileExtensions,
-        'csv',
+        'xml',
       ])
     );
-    expect(screen.getByText('.csv')).toBeInTheDocument();
+    expect(screen.getByText('.xml')).toBeInTheDocument();
     expect(changed).toHaveBeenCalledTimes(1);
 
     window.removeEventListener('outputFileExtensionsChanged', changed);

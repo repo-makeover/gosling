@@ -48,6 +48,7 @@ import type { ResearchLibraryFile } from '../../utils/researchLibrary';
 import { documentTitleFromContent, supportsDocumentTitle } from '../../utils/documentTitle';
 import { ArtifactFileList } from './ArtifactFileList';
 import { OutputHistory } from './OutputHistory';
+import { ARTIFACT_TIMESTAMPS_REFRESH_EVENT } from '../../types/artifactFileTimestamps';
 
 const i18n = defineMessages({
   outputs: { id: 'artifactPane.outputs', defaultMessage: 'Outputs' },
@@ -389,7 +390,10 @@ export function ArtifactPane() {
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [previewRevision, setPreviewRevision] = useState(0);
   const [copyingContents, setCopyingContents] = useState(false);
-  const [documentTitles, setDocumentTitles] = useState<Record<string, string>>({});
+  const [titleRefresh, setTitleRefresh] = useState(0);
+  const [titleCache, setTitleCache] = useState<Record<string, { revision: string; title: string }>>(
+    {}
+  );
   const [loading, setLoading] = useState(false);
   const [outputFileExtensions, setOutputFileExtensions] = useState<string[]>(
     defaultSettings.outputFileExtensions
@@ -549,46 +553,73 @@ export function ArtifactPane() {
     [extensionMatchedArtifacts, hideRepositoryFiles, currentClassification]
   );
 
+  useEffect(() => {
+    const refresh = () => setTitleRefresh((value) => value + 1);
+    window.addEventListener('focus', refresh);
+    window.addEventListener(ARTIFACT_TIMESTAMPS_REFRESH_EVENT, refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener(ARTIFACT_TIMESTAMPS_REFRESH_EVENT, refresh);
+    };
+  }, []);
+
   const titleRequests = useMemo(() => {
-    const requests = new Map<string, { filePath: string; baseDirectory?: string }>();
+    const requests = new Map<string, { filePath: string; revision: string }>();
     for (const artifact of displayedArtifacts) {
-      if (supportsDocumentTitle(artifact.displayPath)) {
-        requests.set(artifact.displayPath, {
-          filePath: artifact.displayPath,
-          baseDirectory: artifact.baseWorkingDir,
+      if (supportsDocumentTitle(artifact.resolvedPath)) {
+        requests.set(artifact.resolvedPath, {
+          filePath: artifact.resolvedPath,
+          revision: JSON.stringify([artifact.lastSeenAt, titleRefresh]),
         });
       }
     }
     for (const file of researchLibraryFiles) {
       if (supportsDocumentTitle(file.path)) {
-        requests.set(file.path, { filePath: file.path });
+        requests.set(file.path, {
+          filePath: file.path,
+          revision: JSON.stringify([file.modifiedAt, titleRefresh]),
+        });
       }
     }
     return Array.from(requests.values());
-  }, [displayedArtifacts, researchLibraryFiles]);
+  }, [displayedArtifacts, researchLibraryFiles, titleRefresh]);
+
+  const documentTitles = useMemo(
+    () =>
+      Object.fromEntries(
+        titleRequests.map(({ filePath, revision }) => [
+          filePath,
+          titleCache[filePath]?.revision === revision ? titleCache[filePath].title : '',
+        ])
+      ),
+    [titleRequests, titleCache]
+  );
 
   useEffect(() => {
-    const pending = titleRequests.filter((request) => !(request.filePath in documentTitles));
+    const pending = titleRequests.filter(
+      ({ filePath, revision }) => titleCache[filePath]?.revision !== revision
+    );
     if (pending.length === 0) return;
     let cancelled = false;
-    void window.electron
-      .readArtifactTitles(pending)
-      .then((titles) => {
+    void (async () => {
+      const results: Record<string, { revision: string; title: string }> = {};
+      // The title IPC accepts at most 200 files, independently of inventory pagination.
+      for (let offset = 0; offset < pending.length; offset += 200) {
+        const batch = pending.slice(offset, offset + 200);
+        const titles = await window.electron.readArtifactTitles(
+          batch.map(({ filePath }) => ({ filePath }))
+        );
         if (cancelled) return;
-        // Record every requested path so a file without a title is asked for once.
-        setDocumentTitles((previous) => {
-          const next = { ...previous };
-          for (const request of pending) {
-            next[request.filePath] = titles[request.filePath] ?? '';
-          }
-          return next;
-        });
-      })
-      .catch(() => {});
+        for (const { filePath, revision } of batch) {
+          results[filePath] = { revision, title: titles[filePath] ?? '' };
+        }
+      }
+      if (!cancelled) setTitleCache((previous) => ({ ...previous, ...results }));
+    })().catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [titleRequests, documentTitles]);
+  }, [titleRequests, titleCache]);
 
   useEffect(() => {
     if (!activeTab || activeTab.source.type === 'content' || activeTab.kind === 'unknown') {
@@ -1061,8 +1092,8 @@ export function ArtifactPane() {
                 items={displayedArtifacts.map((artifact) => ({
                   path: artifact.resolvedPath,
                   timestampRevision: artifact.lastSeenAt,
-                  name: documentTitles[artifact.displayPath] || artifact.displayPath,
-                  detail: documentTitles[artifact.displayPath]
+                  name: documentTitles[artifact.resolvedPath] || artifact.displayPath,
+                  detail: documentTitles[artifact.resolvedPath]
                     ? `${artifact.displayPath} · ${artifact.relation}`
                     : `${artifact.relation} · ${artifact.provenance.replace(/_/g, ' ')}`,
                   active:

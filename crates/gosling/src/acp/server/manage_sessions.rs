@@ -148,8 +148,8 @@ impl GoslingAcpAgent {
             .session_manager
             .update(session_id)
             .additional_working_dirs(additional_working_dirs.clone());
-        if let Some(workspace_context) = workspace_context {
-            update = update.workspace_context(Some(workspace_context));
+        if let Some(workspace_context) = &workspace_context {
+            update = update.workspace_context(Some(workspace_context.clone()));
         }
         update
             .apply()
@@ -173,6 +173,7 @@ impl GoslingAcpAgent {
         Ok(session_working_dirs_response(
             &session.working_dir,
             &additional_working_dirs,
+            workspace_context.as_ref(),
         ))
     }
 
@@ -235,6 +236,7 @@ impl GoslingAcpAgent {
         Ok(session_working_dirs_response(
             &session.working_dir,
             &additional_working_dirs,
+            session.workspace_context.as_ref(),
         ))
     }
 
@@ -733,6 +735,7 @@ impl GoslingAcpAgent {
 fn session_working_dirs_response(
     working_dir: &std::path::Path,
     additional_working_dirs: &[std::path::PathBuf],
+    workspace_context: Option<&crate::workspace::WorkspaceSessionContext>,
 ) -> SessionWorkingDirsResponse {
     SessionWorkingDirsResponse {
         working_dir: working_dir.to_string_lossy().to_string(),
@@ -740,6 +743,9 @@ fn session_working_dirs_response(
             .iter()
             .map(|dir| dir.to_string_lossy().to_string())
             .collect(),
+        workspace_folder_roots: workspace_context
+            .map(|context| context.effective_folder_policy().roots)
+            .unwrap_or_default(),
     }
 }
 
@@ -882,6 +888,22 @@ mod tests {
 
         selected.workspace_context = workspace_context_with_added_root(&selected, &private);
 
+        let response = session_working_dirs_response(
+            &project,
+            std::slice::from_ref(&private),
+            selected.workspace_context.as_ref(),
+        );
+        assert!(response.workspace_folder_roots.iter().any(|root| {
+            std::path::Path::new(&root.path) == private
+                && root.access == crate::workspace::WorkspaceFolderAccess::ReadWrite
+        }));
+        let standalone = session_working_dirs_response(&project, &[], None);
+        assert!(standalone.workspace_folder_roots.is_empty());
+        assert!(serde_json::to_value(standalone)
+            .unwrap()
+            .get("workspaceFolderRoots")
+            .is_none());
+
         assert!(selected
             .workspace_context
             .unwrap()
@@ -929,6 +951,12 @@ mod tests {
         };
 
         let updated = workspace_context_with_added_root(&session, &reference).unwrap();
+
+        let response = session_working_dirs_response(&project, &[], Some(&updated));
+        assert_eq!(
+            response.workspace_folder_roots,
+            updated.effective_folder_policy().roots
+        );
 
         assert_eq!(
             updated
