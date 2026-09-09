@@ -393,6 +393,11 @@ pub async fn run_fs_write_text_file_false<C: Connection>() {
 }
 
 pub async fn run_fs_write_text_file_true<C: Connection>() {
+    // The write tool's response wording ("Created" vs. "Wrote") depends on
+    // whether this shared path already existed, so start from a clean slate
+    // like run_fs_write_text_file_false does.
+    let _ = fs::remove_file("/tmp/test_acp_write.txt");
+
     let expected_session_id = C::expected_session_id();
     let prompt =
         "Use the write tool to write 'test-write-content-67890' to /tmp/test_acp_write.txt";
@@ -473,9 +478,12 @@ pub async fn run_load_mode<C: Connection>() {
                 prompt.to_string(),
                 include_str!("../acp_test_data/openai_tool_call.txt"),
             ),
+            // Approve mode + Cancel below denies the tool; a denied tool call still
+            // owes the model a tool result, so the turn makes a follow-up
+            // completion call reporting the decline instead of FAKE_CODE.
             (
-                format!(r#""content":"{FAKE_CODE}""#),
-                include_str!("../acp_test_data/openai_tool_result.txt"),
+                "declined to run this tool".to_string(),
+                include_str!("../acp_test_data/openai_basic.txt"),
             ),
         ],
         expected_session_id.clone(),
@@ -767,6 +775,14 @@ async fn run_mode_set_impl<C: Connection>(via: SetModeVia) {
             (
                 format!(r#""content":"{FAKE_CODE}""#),
                 include_str!("../acp_test_data/openai_tool_result.txt"),
+            ),
+            // session_b below denies its tool call (Approve mode + Cancel); a
+            // denied tool call still owes the model a tool result, so that turn
+            // makes a follow-up completion call reporting the decline instead
+            // of FAKE_CODE.
+            (
+                "declined to run this tool".to_string(),
+                include_str!("../acp_test_data/openai_basic.txt"),
             ),
         ],
         expected_session_id.clone(),
@@ -1112,16 +1128,27 @@ pub async fn run_permission_persistence<C: Connection>() {
 
     for (decision, expected_status, expected_permission) in cases {
         let temp_dir = tempfile::tempdir().unwrap();
+        // A denied/cancelled tool call still owes the model a tool result, so the
+        // turn makes a follow-up completion call reporting the decline instead of
+        // FAKE_CODE; match that instead of the success-path exchange.
+        let second_exchange = if expected_status == ToolCallStatus::Failed {
+            (
+                "declined to run this tool".to_string(),
+                include_str!("../acp_test_data/openai_basic.txt"),
+            )
+        } else {
+            (
+                format!(r#""content":"{FAKE_CODE}""#),
+                include_str!("../acp_test_data/openai_tool_result.txt"),
+            )
+        };
         let openai = OpenAiFixture::new(
             vec![
                 (
                     prompt.to_string(),
                     include_str!("../acp_test_data/openai_tool_call.txt"),
                 ),
-                (
-                    format!(r#""content":"{FAKE_CODE}""#),
-                    include_str!("../acp_test_data/openai_tool_result.txt"),
-                ),
+                second_exchange,
             ],
             expected_session_id.clone(),
         )
