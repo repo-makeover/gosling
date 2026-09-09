@@ -29,7 +29,9 @@ gosling automatically compacts (summarizes) older parts of your conversation whe
 Auto-compaction is triggered by default when you reach 80% of the token limit in gosling Desktop and the gosling CLI.
 
 Control the auto-compaction behavior with the `GOSLING_AUTO_COMPACT_THRESHOLD` [environment variable](/docs/guides/environment-variables.md#session-management). 
-Disable this feature by setting the value to `0.0`.
+Disable this feature by setting the value to `0.0`. Values must be finite and less than `1.0`;
+`1.0` is rejected by preference/config saves. A positive reduction must be below an enabled
+threshold. Invalid reduction settings stop compaction with an error instead of silently selecting full compaction.
 
 ```
 # Automatically compact sessions when 60% of available tokens are used
@@ -63,7 +65,10 @@ Compaction requests are bounded independently from the conversation that trigger
 them. Gosling sends fixed-size instructions, splits large histories into ordered
 chunks, summarizes those chunks, and reduces the summaries into one continuation
 context. Provider context-limit errors cause smaller bounded retries. Original
-history is replaced only after the final summary succeeds.
+history is replaced only after the final summary succeeds and cancellation is checked.
+For a compacted Desktop resume, the loaded tail is compacted in memory only; it never replaces
+the full stored transcript. A failure after a durable replacement explicitly reports that compaction
+was saved, rather than claiming the original session is intact.
 
 If every bounded retry is rejected, Gosling leaves the original session intact.
 You can switch to another configured provider, run `/compact`, and then switch back;

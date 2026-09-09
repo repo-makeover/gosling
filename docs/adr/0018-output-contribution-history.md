@@ -23,7 +23,9 @@ unknown attribution. There is no retrospective authorship inference from the cur
 The observer examines explicit document targets and existing configured product-output directories,
 plus `Outputs`/`outputs` beneath the working directory. It skips symlinks and hidden subdirectories.
 It is bounded to four subdirectory levels, 2,000 entries, 200 documents, 32 MiB per observation,
-8 MiB per saved file, and 1,000 revisions per path. Supported extensions are Markdown, plain text,
+8 MiB per saved file, and 1,000 revisions per path. Explicit write targets are observed first;
+per-file failures and scan bounds produce counted warnings while eligible siblings still record.
+Supported extensions are Markdown, plain text,
 CSV/TSV, PDF, DOC/DOCX, RTF, ODT, XLSX, PPTX, HTML, PNG, JPEG, SVG, and WebP. A bound or storage failure
 is reported in the successful tool result; it does not turn a completed tool into a retryable failure.
 
@@ -54,9 +56,14 @@ This is local saved revision history, not Git commits or a continuous filesystem
 executed outside the hosted pipeline, external edits between observations, renames, and removed
 directories cannot provide complete change tracking. Concurrent external writers cannot be assigned
 exclusive authorship. Hash checks and same-directory atomic replacement reject observed conflicts,
-but SQLite and the filesystem do not share a transaction: a crash between replacement and commit
-can leave a footer ahead of stored history. The next successful observation can reconcile content;
-the UI only treats committed SQLite revisions as saved history.
+but SQLite and the filesystem do not share a transaction. As of the 2026-09-08 audit repair,
+restore stages and syncs the replacement, commits the baseline and requested restore snapshot,
+then rechecks the live hash and replaces the file. Capture also commits before writing a footer.
+A crash or replacement failure can leave committed snapshots ahead of the live file, never discard
+untracked current bytes without committed recovery snapshots. A saved restore revision therefore
+records the requested restore bytes; after a replacement error, refresh and inspect the file before
+retrying. The UI reports replacement failures and only treats committed SQLite revisions as saved
+history. This ordering supersedes the original persist-before-commit crash-window description.
 
 Revision bytes are retained in the private session database independently of chat deletion, allowing
 later authorized chats using the same path to continue its history. Deleting a chat or trashing an

@@ -666,7 +666,7 @@ impl GoslingAcpAgent {
         self.session_manager
             .list_output_revisions(req)
             .await
-            .map_err(|error| agent_client_protocol::Error::invalid_params().data(error.to_string()))
+            .map_err(output_revision_error)
     }
 
     #[custom_method(GetOutputRevisionRequest)]
@@ -677,7 +677,7 @@ impl GoslingAcpAgent {
         self.session_manager
             .get_output_revision(req)
             .await
-            .map_err(|error| agent_client_protocol::Error::invalid_params().data(error.to_string()))
+            .map_err(output_revision_error)
     }
 
     #[custom_method(RestoreOutputRevisionRequest)]
@@ -688,7 +688,7 @@ impl GoslingAcpAgent {
         self.session_manager
             .restore_output_revision(req)
             .await
-            .map_err(|error| agent_client_protocol::Error::invalid_params().data(error.to_string()))
+            .map_err(output_revision_error)
     }
 
     #[custom_method(GetSessionSummaryRequest)]
@@ -969,5 +969,81 @@ impl GoslingAcpAgent {
         req: CredentialProfileTestRequest,
     ) -> Result<CredentialProfileTestResponse, agent_client_protocol::Error> {
         self.on_credential_profile_test(req).await
+    }
+}
+
+fn output_revision_error(error: anyhow::Error) -> agent_client_protocol::Error {
+    use crate::session::output_revisions::OutputRevisionError;
+    let (mut response, code) = match error.downcast_ref::<OutputRevisionError>() {
+        Some(OutputRevisionError::NotFound(_)) => (
+            agent_client_protocol::Error::resource_not_found(None),
+            "output_not_found",
+        ),
+        Some(OutputRevisionError::Conflict(_)) => (
+            agent_client_protocol::Error::invalid_params(),
+            "output_conflict",
+        ),
+        Some(OutputRevisionError::Limit(_)) => (
+            agent_client_protocol::Error::invalid_params(),
+            "output_limit_exceeded",
+        ),
+        Some(OutputRevisionError::Validation(_)) => (
+            agent_client_protocol::Error::invalid_params(),
+            "output_validation",
+        ),
+        None if matches!(
+            error.downcast_ref::<sqlx::Error>(),
+            Some(sqlx::Error::RowNotFound)
+        ) || error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            (
+                agent_client_protocol::Error::resource_not_found(None),
+                "output_not_found",
+            )
+        }
+        None => (
+            agent_client_protocol::Error::internal_error(),
+            "output_storage",
+        ),
+    };
+    response.message = error.to_string();
+    response.data(serde_json::json!({"code": code, "message": error.to_string()}))
+}
+
+#[cfg(test)]
+mod output_revision_error_tests {
+    use super::*;
+    use crate::session::output_revisions::OutputRevisionError;
+
+    #[test]
+    fn revision_errors_preserve_machine_readable_classes() {
+        for (error, expected) in [
+            (
+                OutputRevisionError::Conflict("changed".into()),
+                "output_conflict",
+            ),
+            (
+                OutputRevisionError::Limit("bound".into()),
+                "output_limit_exceeded",
+            ),
+            (
+                OutputRevisionError::NotFound("missing".into()),
+                "output_not_found",
+            ),
+            (
+                OutputRevisionError::Validation("invalid".into()),
+                "output_validation",
+            ),
+        ] {
+            let value = serde_json::to_value(output_revision_error(error.into())).unwrap();
+            assert_eq!(value["data"]["code"], expected);
+        }
+        let storage =
+            serde_json::to_value(output_revision_error(anyhow::anyhow!("disk failure"))).unwrap();
+        assert_eq!(storage["message"], "disk failure");
+        assert_eq!(storage["code"], -32603);
+        assert_eq!(storage["data"]["code"], "output_storage");
     }
 }

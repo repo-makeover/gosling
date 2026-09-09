@@ -21,6 +21,18 @@ export const defaultOutputFileExtensions = [
   'png',
   'yaml',
   'json',
+  'markdown',
+  'csv',
+  'tsv',
+  'rtf',
+  'odt',
+  'xlsx',
+  'pptx',
+  'html',
+  'htm',
+  'jpeg',
+  'svg',
+  'webp',
 ] as const;
 
 export const OUTPUT_FILE_EXTENSIONS_CHANGED_EVENT = 'outputFileExtensionsChanged';

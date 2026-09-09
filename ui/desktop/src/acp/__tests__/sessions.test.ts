@@ -49,12 +49,14 @@ describe('ACP sessions', () => {
         _meta: {
           workspaceId: 'workspace-1',
           workspaceName: 'Project',
+          workspaceFolderRoots: [{ path: '/reference', access: 'read' }],
         },
       })
     );
 
     expect(session.workspace_id).toBe('workspace-1');
     expect(session.workspace_name).toBe('Project');
+    expect(session.workspace_folder_roots).toEqual([{ path: '/reference', access: 'read' }]);
   });
 
   it('recognises a Deep Research session from its metadata', () => {

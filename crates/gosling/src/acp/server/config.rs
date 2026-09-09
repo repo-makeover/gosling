@@ -126,6 +126,21 @@ impl GoslingAcpAgent {
     ) -> Result<EmptyResponse, agent_client_protocol::Error> {
         let config = self.config()?;
 
+        if let Some(def) = PREFERENCE_DEFS.iter().find(|def| {
+            def.config_key == req.key
+                && matches!(
+                    def.key,
+                    PreferenceKey::AutoCompactThreshold | PreferenceKey::AutoCompactReduction
+                )
+        }) {
+            if req.is_secret {
+                return Err(agent_client_protocol::Error::invalid_params()
+                    .data("Preferences cannot be stored as secrets"));
+            }
+            let value = (def.prepare)(&req.value)?;
+            validate_compaction_preferences(config, &[(req.key.clone(), value)])?;
+        }
+
         if req.key == "GOSLING_PROVIDER" {
             if let Some(name) = req.value.as_str() {
                 let model = crate::config::get_provider_entry(config, name)
@@ -157,6 +172,9 @@ impl GoslingAcpAgent {
     ) -> Result<EmptyResponse, agent_client_protocol::Error> {
         let config = self.config()?;
 
+        if !req.is_secret {
+            validate_compaction_preferences(config, &[(req.key.clone(), serde_json::Value::Null)])?;
+        }
         if req.is_secret {
             config.delete_secret(&req.key).internal_err()?;
         } else if req.key == "GOSLING_PROVIDER" || req.key == "active_provider" {
@@ -342,11 +360,8 @@ fn validate_compaction_preferences(
         REDUCTION,
         crate::context_mgmt::DEFAULT_AUTO_COMPACT_REDUCTION,
     );
-    if reduction > 0.0 && reduction >= threshold {
-        return Err(agent_client_protocol::Error::invalid_params()
-            .data("autoCompactReduction must be less than autoCompactThreshold (or 0 for full compaction)"));
-    }
-    Ok(())
+    crate::context_mgmt::validate_compaction_settings(threshold, reduction)
+        .map_err(|error| agent_client_protocol::Error::invalid_params().data(error.to_string()))
 }
 
 fn prepare_auto_compact_threshold(
@@ -356,10 +371,8 @@ fn prepare_auto_compact_threshold(
         return Err(agent_client_protocol::Error::invalid_params()
             .data("autoCompactThreshold must be a number"));
     };
-    if !threshold.is_finite() || threshold <= 0.0 || threshold > 1.0 {
-        return Err(agent_client_protocol::Error::invalid_params()
-            .data("autoCompactThreshold must be greater than 0 and at most 1"));
-    }
+    crate::context_mgmt::validate_compaction_settings(threshold, 0.0)
+        .map_err(|error| agent_client_protocol::Error::invalid_params().data(error.to_string()))?;
 
     Ok(value.clone())
 }
@@ -371,10 +384,8 @@ fn prepare_auto_compact_reduction(
         return Err(agent_client_protocol::Error::invalid_params()
             .data("autoCompactReduction must be a number"));
     };
-    if !reduction.is_finite() || !(0.0..1.0).contains(&reduction) {
-        return Err(agent_client_protocol::Error::invalid_params()
-            .data("autoCompactReduction must be at least 0 and less than 1"));
-    }
+    crate::context_mgmt::validate_compaction_settings(0.0, reduction)
+        .map_err(|error| agent_client_protocol::Error::invalid_params().data(error.to_string()))?;
 
     Ok(value.clone())
 }

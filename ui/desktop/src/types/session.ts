@@ -1,3 +1,4 @@
+import type { WorkspaceFolder } from '@repo-makeover/gosling-sdk';
 import type { Message } from './message';
 
 export type ExtensionData = Record<string, unknown>;
@@ -50,6 +51,7 @@ export type Session = {
   working_dir: string;
   workspace_id?: string | null;
   workspace_name?: string | null;
+  workspace_folder_roots?: Pick<WorkspaceFolder, 'path' | 'access'>[];
   credential_profile_id?: string | null;
   credential_profile_name?: string | null;
   imported_untrusted?: boolean;

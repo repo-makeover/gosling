@@ -5382,7 +5382,8 @@
           "type": "string"
         },
         "contentHash": {
-          "type": "string"
+          "type": "string",
+          "description": "SHA-256 of document body bytes, excluding a recognized managed Markdown footer."
         },
         "sizeBytes": {
           "type": "integer",
@@ -5507,7 +5508,8 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "SHA-256 of all current on-disk bytes, including the footer; absent if missing."
         }
       },
       "required": [
@@ -5530,7 +5532,8 @@
           "type": "integer"
         },
         "expectedCurrentHash": {
-          "type": "string"
+          "type": "string",
+          "description": "Use currentHash from revision retrieval, not revision.contentHash."
         }
       },
       "required": [

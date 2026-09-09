@@ -279,6 +279,7 @@ async fn setup_test_session_with_usage(
 struct ThresholdCompactionProvider {
     has_seen_compaction: Arc<AtomicBool>,
     first_call_total_tokens: i32,
+    cancel_during_compaction: Option<tokio_util::sync::CancellationToken>,
 }
 
 impl ThresholdCompactionProvider {
@@ -287,6 +288,7 @@ impl ThresholdCompactionProvider {
         Self {
             has_seen_compaction: Arc::new(AtomicBool::new(false)),
             first_call_total_tokens: 5_000,
+            cancel_during_compaction: None,
         }
     }
 
@@ -295,6 +297,7 @@ impl ThresholdCompactionProvider {
         Self {
             has_seen_compaction: Arc::new(AtomicBool::new(false)),
             first_call_total_tokens: 110_000, // > 0.8 * 128_000 = 102_400
+            cancel_during_compaction: None,
         }
     }
 }
@@ -312,6 +315,9 @@ impl Provider for ThresholdCompactionProvider {
 
         if is_compaction {
             self.has_seen_compaction.store(true, Ordering::SeqCst);
+            if let Some(cancel) = &self.cancel_during_compaction {
+                cancel.cancel();
+            }
             return Ok(stream_from_single_message(
                 Message::assistant().with_text("<mock summary of conversation>"),
                 ProviderUsage::new(
@@ -1177,5 +1183,134 @@ async fn test_compaction_fires_inside_reply_loop() -> Result<()> {
         .await?;
     assert_conversation_compacted(&updated.conversation.expect("should have conversation"));
 
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn compacted_resume_keeps_unloaded_durable_messages() -> Result<()> {
+    let _threshold = pin_auto_compact_threshold();
+    let temp_dir = TempDir::new()?;
+    let agent = Agent::new();
+    let messages: Vec<_> = (0..80)
+        .map(|index| {
+            if index % 2 == 0 {
+                Message::user().with_text(format!("original {index}"))
+            } else {
+                Message::assistant().with_text(format!("original {index}"))
+            }
+        })
+        .collect();
+    let session = setup_test_session_with_usage(
+        &agent,
+        &temp_dir,
+        "partial-resume",
+        messages,
+        Usage::new(Some(109_900), Some(100), Some(110_000)),
+    )
+    .await?;
+    agent
+        .update_provider(
+            Arc::new(ThresholdCompactionProvider::for_case1()),
+            ModelConfig::new("mock-model"),
+            &session.id,
+        )
+        .await?;
+    let stream = agent
+        .reply(
+            Message::user().with_text("Continue"),
+            SessionConfig {
+                id: session.id.clone(),
+                max_turns: None,
+                compacted_context: true,
+                tail_limit: Some(50),
+            },
+            None,
+        )
+        .await?;
+    tokio::pin!(stream);
+    let mut compacted = false;
+    while let Some(event) = stream.next().await {
+        if matches!(event?, AgentEvent::HistoryReplaced(_)) {
+            compacted = true;
+        }
+    }
+    assert!(compacted);
+    let stored = agent
+        .config
+        .session_manager
+        .get_session(&session.id, true)
+        .await?;
+    let conversation = stored.conversation.unwrap();
+    for index in 0..80 {
+        assert!(conversation
+            .messages()
+            .iter()
+            .any(|message| message.as_concat_text() == format!("original {index}")));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn canceled_auto_compaction_does_not_replace_history() -> Result<()> {
+    let _threshold = pin_auto_compact_threshold();
+    let temp_dir = TempDir::new()?;
+    let agent = Agent::new();
+    let session = setup_test_session_with_usage(
+        &agent,
+        &temp_dir,
+        "cancel-compaction",
+        (0..60)
+            .map(|index| {
+                if index % 2 == 0 {
+                    Message::user().with_text(format!("Keep this history {index}"))
+                } else {
+                    Message::assistant().with_text(format!("Reply {index}"))
+                }
+            })
+            .collect(),
+        Usage::new(Some(109_900), Some(100), Some(110_000)),
+    )
+    .await?;
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let mut provider = ThresholdCompactionProvider::for_case1();
+    provider.cancel_during_compaction = Some(cancel.clone());
+    let seen = provider.has_seen_compaction.clone();
+    agent
+        .update_provider(
+            Arc::new(provider),
+            ModelConfig::new("mock-model"),
+            &session.id,
+        )
+        .await?;
+    let stream = agent
+        .reply(
+            Message::user().with_text("Continue"),
+            SessionConfig {
+                id: session.id.clone(),
+                max_turns: None,
+                compacted_context: false,
+                tail_limit: None,
+            },
+            Some(cancel.clone()),
+        )
+        .await?;
+    tokio::pin!(stream);
+    while let Some(event) = stream.next().await {
+        assert!(!matches!(event?, AgentEvent::HistoryReplaced(_)));
+    }
+    assert!(seen.load(Ordering::SeqCst));
+    let stored = agent
+        .config
+        .session_manager
+        .get_session(&session.id, true)
+        .await?;
+    assert!(stored
+        .conversation
+        .unwrap()
+        .messages()
+        .iter()
+        .any(|message| message.as_concat_text() == "Keep this history 0"));
     Ok(())
 }

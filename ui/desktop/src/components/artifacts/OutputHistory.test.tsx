@@ -182,7 +182,7 @@ describe('OutputHistory', () => {
     vi.mocked(getOutputHistory).mockResolvedValue({ revisions: [], nextBeforeVersion: null });
     show();
     fireEvent.click(screen.getByRole('button', { name: 'History' }));
-    expect(await screen.findByText(/No saved revisions/)).toBeInTheDocument();
+    expect(await screen.findByText(/No saved revisions\. History begins/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restore revision' })).toBeDisabled();
   });
 
@@ -193,4 +193,29 @@ describe('OutputHistory', () => {
     expect(getLatestOutputRevision).not.toHaveBeenCalled();
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
+});
+
+it('keeps selected content exportable when comparison retrieval fails', async () => {
+  vi.mocked(getOutputRevision).mockImplementation(async (_session, _path, version) => {
+    if (version === 1) throw new Error('Previous revision unavailable');
+    return {
+      revision: revision(version),
+      contentBase64: window.btoa('Current saved content'),
+      currentHash: 'current',
+    };
+  });
+  show();
+  fireEvent.click(screen.getByRole('button', { name: 'History' }));
+  expect(await screen.findByText('Current saved content')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Compare with previous' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Previous revision unavailable');
+  expect(screen.getByText('Current saved content')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Export revision' })).toBeEnabled();
+  expect(screen.getByRole('button', { name: 'Restore revision' })).toBeEnabled();
+});
+
+it('labels empty history separately from unknown authorship', async () => {
+  vi.mocked(getLatestOutputRevision).mockResolvedValue(null);
+  show();
+  expect(await screen.findByText('No saved revisions')).toBeInTheDocument();
 });

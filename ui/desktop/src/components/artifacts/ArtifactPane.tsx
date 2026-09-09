@@ -23,7 +23,7 @@ import { cn } from '../../utils';
 import MarkdownContent from '../MarkdownContent';
 import { Button } from '../ui/button';
 import { Switch } from '../ui/switch';
-import { ARTIFACT_REPOSITORY_BATCH_LIMIT, isSourceCodeFile } from '../../utils/artifactRepository';
+import { ARTIFACT_REPOSITORY_BATCH_LIMIT } from '../../utils/artifactRepository';
 import {
   addSandboxCsp,
   hasDisplayedFileExtension,
@@ -47,6 +47,7 @@ import { SessionInputControls } from './SessionInputControls';
 import type { ResearchLibraryFile } from '../../utils/researchLibrary';
 import { documentTitleFromContent, supportsDocumentTitle } from '../../utils/documentTitle';
 import { ArtifactFileList } from './ArtifactFileList';
+import { OutputHistory } from './OutputHistory';
 
 const i18n = defineMessages({
   outputs: { id: 'artifactPane.outputs', defaultMessage: 'Outputs' },
@@ -357,6 +358,7 @@ export function ArtifactPane() {
     activeTab,
     activeTabId,
     artifacts,
+    trashedArtifacts = [],
     closeTab,
     forgetTrashedFiles,
     hideRepositoryFiles,
@@ -507,9 +509,7 @@ export function ArtifactPane() {
   useEffect(() => {
     if (!hideRepositoryFiles) return;
     let cancelled = false;
-    const filePaths = extensionMatchedArtifacts
-      .map((artifact) => artifact.resolvedPath)
-      .filter((filePath) => !isSourceCodeFile(filePath));
+    const filePaths = extensionMatchedArtifacts.map((artifact) => artifact.resolvedPath);
     void (async () => {
       const paths = new Set<string>();
       let unavailable = false;
@@ -543,9 +543,7 @@ export function ArtifactPane() {
     () =>
       hideRepositoryFiles
         ? extensionMatchedArtifacts.filter(
-            (artifact) =>
-              !isSourceCodeFile(artifact.resolvedPath) &&
-              !currentClassification?.paths.has(artifact.resolvedPath)
+            (artifact) => !currentClassification?.paths.has(artifact.resolvedPath)
           )
         : extensionMatchedArtifacts,
     [extensionMatchedArtifacts, hideRepositoryFiles, currentClassification]
@@ -1030,6 +1028,29 @@ export function ArtifactPane() {
                 </p>
               )}
           </div>
+          {visibleSessionId && trashedArtifacts.length > 0 && (
+            <details className="max-h-52 shrink-0 overflow-y-auto border-b border-border-primary p-3">
+              <summary className="cursor-pointer text-xs">
+                Saved history for removed outputs ({trashedArtifacts.length})
+              </summary>
+              <p className="py-2 text-xs text-text-secondary">
+                Saved revisions remain after Trash or chat deletion. Export them here; restore the
+                file from Trash before using Restore revision.
+              </p>
+              {trashedArtifacts.map((artifact) => (
+                <div key={artifact.resolvedPath}>
+                  <p className="break-all text-xs">{artifact.displayPath}</p>
+                  <OutputHistory sessionId={visibleSessionId} path={artifact.resolvedPath} />
+                </div>
+              ))}
+            </details>
+          )}
+          {artifacts.length > extensionMatchedArtifacts.length && (
+            <p role="status" className="px-3 py-2 text-xs text-text-secondary">
+              {artifacts.length - extensionMatchedArtifacts.length} outputs hidden by file
+              extensions. Change Outputs file extensions in Settings.
+            </p>
+          )}
           {displayedArtifacts.length > 0 && (
             <div className="max-h-52 shrink-0 overflow-y-auto border-b border-border-primary py-1">
               <ArtifactFileList

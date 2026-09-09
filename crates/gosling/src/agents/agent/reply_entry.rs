@@ -379,6 +379,7 @@ impl Agent {
                         &session_config,
                         &conversation_to_compact,
                         auto_compact_budget,
+                        cancel_token.as_ref(),
                     )
                     .await
                 {
@@ -395,7 +396,7 @@ impl Agent {
                     Err(e) => {
                         yield AgentEvent::Message(
                             Message::assistant()
-                                .with_text(crate::context_mgmt::compaction_failure_message(&e))
+                                .with_text(crate::context_mgmt::auto_compaction_failure_message(&e))
                         );
                         return;
                     }
@@ -415,6 +416,7 @@ impl Agent {
         session_config: &SessionConfig,
         conversation: &Conversation,
         tokens_to_remove: Option<usize>,
+        cancel_token: Option<&CancellationToken>,
     ) -> Result<Conversation> {
         self.perform_compact_with_provider(
             self.provider().await?,
@@ -422,6 +424,7 @@ impl Agent {
             session_config,
             conversation,
             tokens_to_remove,
+            cancel_token,
         )
         .await
     }
@@ -433,8 +436,13 @@ impl Agent {
         session_config: &SessionConfig,
         conversation: &Conversation,
         tokens_to_remove: Option<usize>,
+        cancel_token: Option<&CancellationToken>,
     ) -> Result<Conversation> {
-        let (compacted_conversation, usage) = compact_messages(
+        let cancellation = cancel_token.cloned().unwrap_or_default();
+        let (compacted_conversation, usage) = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => anyhow::bail!("Compaction canceled before saving"),
+            result = compact_messages(
             provider.as_ref(),
             model_config,
             &session_config.id,
@@ -442,13 +450,29 @@ impl Agent {
             false,
             tokens_to_remove,
         )
-        .await?;
+        => result?,
+        };
+        anyhow::ensure!(
+            !cancellation.is_cancelled(),
+            "Compaction canceled before saving"
+        );
         let session_manager = self.config.session_manager.clone();
-        session_manager
-            .replace_conversation(&session_config.id, &compacted_conversation)
-            .await?;
+        // A compacted resume contains only a tail: its context may be folded in memory,
+        // but replacing durable history would delete messages that were never loaded.
+        if !session_config.compacted_context {
+            session_manager
+                .replace_conversation(&session_config.id, &compacted_conversation)
+                .await?;
+        }
         self.update_session_metrics(&session_config.id, &usage, true)
-            .await?;
+            .await
+            .map_err(|error| {
+                if session_config.compacted_context {
+                    error
+                } else {
+                    crate::context_mgmt::CompactionMetricsError(error).into()
+                }
+            })?;
         Ok(compacted_conversation)
     }
 

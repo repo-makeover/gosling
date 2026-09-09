@@ -443,7 +443,7 @@ describe('ArtifactPane', () => {
     expect(readArtifactFile).not.toHaveBeenCalled();
   });
 
-  it('toggles source and repository files while preserving previews and the extension filter', async () => {
+  it('hides confirmed repository files and keeps source-like outputs and previews', async () => {
     readArtifactFile.mockResolvedValue({
       content: 'print("hello")',
       encoding: 'utf8',
@@ -477,15 +477,16 @@ describe('ArtifactPane', () => {
     expect(classifyArtifactRepositories).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('switch', { name: 'Hide repository files' }));
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'Outputs 1' })).toBeInTheDocument());
-    expect(screen.getByText('2 hidden')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Outputs 2' })).toBeInTheDocument());
+    expect(screen.getByText('1 hidden')).toBeInTheDocument();
     expect(screen.getByTitle('/outputs/report.md')).toBeInTheDocument();
     expect(screen.queryByTitle('/outputs/brief.docx')).not.toBeInTheDocument();
-    expect(screen.queryByRole('checkbox', { name: 'Select analysis.py' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Select analysis.py' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'analysis.py' })).toBeInTheDocument();
     expect(classifyArtifactRepositories).toHaveBeenCalledWith([
       '/outputs/report.md',
       '/outputs/brief.docx',
+      '/outputs/analysis.py',
     ]);
 
     fireEvent.click(screen.getByRole('switch', { name: 'Hide repository files' }));
@@ -982,7 +983,7 @@ describe('ArtifactPane', () => {
       );
       fireEvent.click(screen.getByRole('button', { name: 'Load mixed outputs' }));
       fireEvent.click(screen.getByTitle('/outputs/report.md'));
-      fireEvent.click(screen.getByRole('button', { name: 'Delete report.md' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Move report.md to Trash' }));
       expect(screen.getByTitle('/outputs/report.md')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
       await waitFor(() =>
@@ -991,6 +992,7 @@ describe('ArtifactPane', () => {
       expect(trashArtifactFiles).toHaveBeenCalledWith(['/outputs/report.md']);
       expect(screen.queryByTitle('/outputs/report.md')).not.toBeInTheDocument();
       expect(screen.queryByTitle('Close report.md')).not.toBeInTheDocument();
+      expect(screen.getByText('Saved history for removed outputs (1)')).toBeInTheDocument();
       expect(screen.getByTitle('/outputs/brief.docx')).toBeInTheDocument();
     }
   );
@@ -1021,7 +1023,7 @@ describe('ArtifactPane', () => {
     fireEvent.click(await screen.findByRole('tab', { name: 'Library 2' }));
     await screen.findByTitle('/library/one.md');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Select all' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move selected to Trash' }));
     vi.mocked(window.electron.listResearchLibraryFiles).mockResolvedValue({
       files: [files[1]],
       truncated: false,
@@ -1048,6 +1050,6 @@ describe('ArtifactPane', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Load MIME PDF' }));
     expect(screen.queryByText('2 selected')).not.toBeInTheDocument();
     expect(screen.getByRole('checkbox', { name: 'Select report.pdf' })).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Delete selected' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Move selected to Trash' })).toBeDisabled();
   });
 });

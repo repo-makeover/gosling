@@ -197,10 +197,20 @@ const MANUAL_COMPACT_CONTINUATION_TEXT: &str =
 Do not mention that you read a summary or that conversation summarization occurred.
 Just continue the conversation naturally based on the summarized context.";
 
+#[derive(Debug, thiserror::Error)]
+#[error("Compaction was saved, but usage metrics could not be updated: {0}")]
+pub(crate) struct CompactionMetricsError(pub anyhow::Error);
+
+pub(crate) fn auto_compaction_failure_message(error: &anyhow::Error) -> String {
+    if error.is::<CompactionMetricsError>() {
+        format!("{error}\n\nRefresh the session history before deciding whether to compact again.")
+    } else {
+        compaction_failure_message(error)
+    }
+}
+
 pub fn compaction_failure_message(error: &dyn std::fmt::Display) -> String {
-    format!(
-        "Compaction did not complete: {error}\n\nYour original session is intact. You can switch providers and run /compact again, or start a new session with the essential context."
-    )
+    format!("Compaction did not complete: {error}\n\nYour original session is intact. You can switch providers and run /compact again, or start a new session with the essential context.")
 }
 
 #[derive(Serialize)]
@@ -464,6 +474,23 @@ pub async fn compact_messages(
     ))
 }
 
+/// Shared legal range for persisted preferences and runtime configuration.
+pub fn validate_compaction_settings(threshold: f64, reduction: f64) -> Result<()> {
+    anyhow::ensure!(
+        threshold.is_finite() && (0.0..1.0).contains(&threshold),
+        "autoCompactThreshold must be at least 0 and less than 1 (0 disables auto-compaction)"
+    );
+    anyhow::ensure!(
+        reduction.is_finite() && (0.0..1.0).contains(&reduction),
+        "autoCompactReduction must be at least 0 and less than 1"
+    );
+    anyhow::ensure!(
+        threshold == 0.0 || reduction == 0.0 || reduction < threshold,
+        "autoCompactReduction must be less than autoCompactThreshold (or 0 for full compaction)"
+    );
+    Ok(())
+}
+
 /// Check if messages exceed the auto-compaction threshold
 pub async fn check_if_compaction_needed(
     provider: &dyn Provider,
@@ -482,18 +509,9 @@ pub async fn check_if_compaction_needed(
             .unwrap_or(DEFAULT_COMPACTION_THRESHOLD)
     });
 
-    // Skip the tokenization pass entirely when auto-compact is disabled.
-    if threshold <= 0.0 || threshold >= 1.0 {
-        if threshold >= 1.0 {
-            static WARNED: std::sync::atomic::AtomicBool =
-                std::sync::atomic::AtomicBool::new(false);
-            if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
-                tracing::warn!(
-                    "GOSLING_AUTO_COMPACT_THRESHOLD={} disables auto-compaction; use a value between 0 and 1 (or 0 to disable explicitly)",
-                    threshold
-                );
-            }
-        }
+    validate_compaction_settings(threshold, 0.0)?;
+    // Skip tokenization only for the explicit disabled value.
+    if threshold == 0.0 {
         return Ok(false);
     }
 
@@ -556,8 +574,8 @@ async fn resolve_context_usage(
 /// context window in a single pass — regardless of how far past `threshold`
 /// usage had already climbed when the check ran, rather than needing several
 /// turns to crawl back under it. Returns `None` when the reduction is
-/// disabled or misconfigured (`<= 0` or `>= threshold`), which tells the
-/// caller to fall back to collapsing the whole eligible region as before.
+/// disabled (zero), which requests full eligible-region compaction. Invalid
+/// settings return an actionable error instead of silently changing the budget.
 ///
 /// `threshold_override`/`reduction_override` mirror `check_if_compaction_needed`'s
 /// `threshold_override`: production callers pass `None` to read the real
@@ -577,7 +595,8 @@ pub async fn auto_compact_reduction_budget(
     });
     let reduction = reduction_override.unwrap_or_else(auto_compact_reduction);
 
-    if reduction <= 0.0 || reduction >= threshold {
+    validate_compaction_settings(threshold, reduction)?;
+    if reduction == 0.0 || threshold == 0.0 {
         return Ok(None);
     }
 
@@ -1857,7 +1876,7 @@ mod tests {
         );
     }
 
-    // When auto-compact is disabled (threshold 0 or 1), check_if_compaction_needed
+    // When auto-compact is disabled (threshold 0), check_if_compaction_needed
     // must return false immediately without touching the tokenizer.
     #[tokio::test]
     async fn test_check_if_compaction_needed_returns_false_when_disabled() {
@@ -1868,47 +1887,61 @@ mod tests {
             Message::assistant().with_text("Hi"),
         ]);
 
-        for disabled_threshold in [0.0, 1.0, 1.5] {
-            let result = check_if_compaction_needed(
+        assert!(
+            !check_if_compaction_needed(&provider, &conversation, Some(0.0), &session)
+                .await
+                .unwrap()
+        );
+        for invalid_threshold in [1.0, 1.5, -0.1, f64::NAN] {
+            assert!(check_if_compaction_needed(
                 &provider,
                 &conversation,
-                Some(disabled_threshold),
-                &session,
+                Some(invalid_threshold),
+                &session
             )
             .await
-            .unwrap();
-
-            assert!(
-                !result,
-                "Compaction should be disabled for threshold {disabled_threshold}"
-            );
+            .is_err());
         }
     }
 
-    // reduction >= threshold (or <= 0) would put the target at or above the
-    // trigger point itself, so it must disable the soft path and signal
-    // callers to fall back to a full collapse instead of silently no-op'ing.
+    #[test]
+    fn compaction_failure_distinguishes_a_committed_replacement() {
+        let error = anyhow::anyhow!("metrics unavailable");
+        assert!(compaction_failure_message(&error).contains("original session is intact"));
+        let committed = CompactionMetricsError(error).into();
+        let message = auto_compaction_failure_message(&committed);
+        assert!(message.contains("Compaction was saved"));
+        assert!(!message.contains("original session is intact"));
+    }
+
     #[tokio::test]
-    async fn test_auto_compact_reduction_budget_disabled_when_misconfigured() {
+    async fn test_auto_compact_reduction_budget_rejects_invalid_settings() {
         let provider = MockProvider::new(Message::assistant().with_text("x"), 1_000);
         let session = crate::session::Session::default();
         let conversation = Conversation::new_unvalidated(vec![Message::user().with_text("hi")]);
-
-        for reduction in [0.0, -0.1, 0.6, 0.8] {
-            let result = auto_compact_reduction_budget(
+        for reduction in [-0.1, 0.6, 0.8, f64::NAN] {
+            assert!(auto_compact_reduction_budget(
                 &provider,
                 &conversation,
                 &session,
                 Some(0.6),
-                Some(reduction),
+                Some(reduction)
             )
             .await
-            .unwrap();
-            assert!(
-                result.is_none(),
-                "reduction {reduction} against threshold 0.6 should disable the soft path"
-            );
+            .is_err());
         }
+        assert!(auto_compact_reduction_budget(
+            &provider,
+            &conversation,
+            &session,
+            Some(0.6),
+            Some(0.0)
+        )
+        .await
+        .unwrap()
+        .is_none());
+        assert!(validate_compaction_settings(0.0, 0.15).is_ok());
+        assert!(validate_compaction_settings(1.0, 0.15).is_err());
     }
 
     #[tokio::test]

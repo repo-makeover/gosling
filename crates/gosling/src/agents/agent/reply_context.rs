@@ -149,6 +149,7 @@ impl Agent {
     pub(super) async fn handle_approved_and_denied_tools(
         &self,
         permission_check_result: &PermissionCheckResult,
+        inspection_results: &[crate::tool_inspection::InspectionResult],
         request_to_response_map: &mut HashMap<String, Message>,
         cancel_token: Option<tokio_util::sync::CancellationToken>,
         session: &Session,
@@ -189,12 +190,17 @@ impl Agent {
             }
         }
 
-        Self::handle_denied_tools(permission_check_result, request_to_response_map);
+        Self::handle_denied_tools(
+            permission_check_result,
+            inspection_results,
+            request_to_response_map,
+        );
         Ok(tool_futures)
     }
 
     fn handle_denied_tools(
         permission_check_result: &PermissionCheckResult,
+        inspection_results: &[crate::tool_inspection::InspectionResult],
         request_to_response_map: &mut HashMap<String, Message>,
     ) {
         for request in &permission_check_result.denied {
@@ -202,7 +208,17 @@ impl Agent {
                 response.add_tool_response_with_metadata(
                     request.id.clone(),
                     Ok(CallToolResult::error(vec![rmcp::model::Content::text(
-                        DECLINED_RESPONSE,
+                        inspection_results
+                            .iter()
+                            .find(|result| {
+                                result.tool_request_id == request.id
+                                    && matches!(
+                                        result.action,
+                                        crate::tool_inspection::InspectionAction::Deny
+                                    )
+                            })
+                            .map(|result| format!("Tool denied by policy: {}", result.reason))
+                            .unwrap_or_else(|| "Tool denied by current permissions.".into()),
                     )])),
                     request.metadata.as_ref(),
                 );

@@ -20,10 +20,14 @@ vi.mock('react-router-dom', () => ({
 }));
 
 vi.mock('../workspaces/WorkspaceSidebarSection', () => ({
-  WorkspaceSidebarSection: ({ readyWorkspaceIds }: { readyWorkspaceIds: ReadonlySet<string> }) => (
+  WorkspaceSidebarSection: ({
+    unreadWorkspaceIds,
+  }: {
+    unreadWorkspaceIds: ReadonlySet<string>;
+  }) => (
     <div data-testid="workspaces">
       Workspaces
-      {[...readyWorkspaceIds].map((id) => (
+      {[...unreadWorkspaceIds].map((id) => (
         <span key={id}>Ready workspace: {id}</span>
       ))}
     </div>
@@ -147,7 +151,7 @@ describe('NavigationPanel workspaces/chats divider', () => {
   });
 });
 
-describe('NavigationPanel workspace readiness', () => {
+describe('NavigationPanel workspace unread activity', () => {
   const onSessionClick = vi.fn();
   const firstSession = {
     id: 'math-1',
@@ -244,7 +248,7 @@ describe('NavigationPanel workspace readiness', () => {
   });
 
   it.each([AppEvents.SESSION_ARCHIVED, AppEvents.SESSION_DELETED])(
-    'removes readiness when the chat is %s',
+    'removes unread activity when the chat is %s',
     (eventName) => {
       renderPanel();
       finishChat('math-1', 'math');

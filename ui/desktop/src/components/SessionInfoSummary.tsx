@@ -64,9 +64,7 @@ export default function SessionInfoSummary({
 }: SessionInfoSummaryProps) {
   const directories = useMemo(
     () =>
-      session?.working_dir
-        ? [session.working_dir, ...(session.additional_working_dirs ?? [])]
-        : [],
+      session?.working_dir ? [session.working_dir, ...(session.additional_working_dirs ?? [])] : [],
     [session?.working_dir, session?.additional_working_dirs]
   );
 
@@ -189,7 +187,9 @@ export default function SessionInfoSummary({
             <span>
               {session.restrict_tools_to_working_dirs
                 ? 'Tools are restricted to the listed directories. Providers that run their own tools (Claude Code CLI, Codex CLI, …) are blocked while this is on.'
-                : 'Tools are not restricted to the listed directories.'}
+                : session.workspace_id
+                  ? 'Workspace folder policy is enforced, including read-only folders and approval for out-of-scope mutations.'
+                  : 'Tools are not restricted to the listed directories.'}
             </span>
             <Switch
               checked={session.restrict_tools_to_working_dirs ?? false}

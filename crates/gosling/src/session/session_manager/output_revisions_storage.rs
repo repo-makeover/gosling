@@ -7,8 +7,8 @@ use crate::session::artifacts::{
 };
 use crate::session::output_revisions::{
     annotated_snapshot, canonical_output_path, digest, is_output_document, markdown_body,
-    output_roots, read_snapshot, replace_if_unchanged, scan_output_roots, OutputSnapshot,
-    MAX_CAPTURE_BYTES, MAX_OUTPUT_REVISION_BYTES,
+    output_roots, prepare_replacement, read_snapshot, replace_if_unchanged, scan_output_roots,
+    OutputRevisionError, OutputSnapshot, MAX_CAPTURE_BYTES, MAX_OUTPUT_REVISION_BYTES,
 };
 use anyhow::{ensure, Result};
 use base64::Engine;
@@ -27,6 +27,7 @@ pub struct OutputCapture {
     call: CallToolRequestParams,
     before: BTreeMap<PathBuf, OutputSnapshot>,
     candidates: BTreeSet<PathBuf>,
+    warnings: Vec<String>,
 }
 
 impl SessionStorage {
@@ -119,25 +120,38 @@ impl SessionManager {
         }
         let call = call.clone();
         tokio::task::spawn_blocking(move || {
-            let mut candidates: BTreeSet<_> = mutation_paths(&call, &session.working_dir)
+            let candidates: BTreeSet<_> = mutation_paths(&call, &session.working_dir)
                 .into_iter()
                 .filter(|path| is_output_document(path))
                 .collect();
-            candidates.extend(scan_output_roots(&output_roots(&session))?);
+            let (observed, mut warnings) = scan_output_roots(&output_roots(&session));
+            let candidates = candidates
+                .iter()
+                .chain(observed.iter().filter(|path| !candidates.contains(*path)));
             let mut before = BTreeMap::new();
             let mut authorized = BTreeSet::new();
             let mut total = 0;
             for candidate in candidates {
-                let Ok(path) = canonical_output_path(&session, &candidate, true) else {
+                let Ok(path) = canonical_output_path(&session, candidate, true) else {
                     continue;
                 };
-                if let Some(snapshot) = read_snapshot(&path)? {
-                    total += snapshot.bytes.len();
-                    ensure!(
-                        total <= MAX_CAPTURE_BYTES,
-                        "Output observation exceeded 32 MiB"
-                    );
-                    before.insert(path.clone(), snapshot);
+                match read_snapshot(&path) {
+                    Ok(Some(snapshot)) if total + snapshot.bytes.len() <= MAX_CAPTURE_BYTES => {
+                        total += snapshot.bytes.len();
+                        before.insert(path.clone(), snapshot);
+                    }
+                    Ok(None) => {}
+                    Ok(Some(_)) => {
+                        warnings.push(format!(
+                            "{}: Output observation exceeded 32 MiB",
+                            path.display()
+                        ));
+                        continue;
+                    }
+                    Err(error) => {
+                        warnings.push(format!("{}: {error}", path.display()));
+                        continue;
+                    }
                 }
                 authorized.insert(path);
             }
@@ -149,6 +163,7 @@ impl SessionManager {
                 call,
                 before,
                 candidates: authorized,
+                warnings,
             }))
         })
         .await?
@@ -186,151 +201,180 @@ impl SessionManager {
                 .map(|artifact| PathBuf::from(&artifact.resolved_path))
                 .filter(|path| is_output_document(path)),
         );
+        let preferred = direct.clone();
         let after = tokio::task::spawn_blocking(move || -> Result<_> {
-            candidates.extend(scan_output_roots(&output_roots(&observed_session))?);
+            let (observed, mut warnings) = scan_output_roots(&output_roots(&observed_session));
+            candidates.extend(observed);
+            let candidates = preferred
+                .iter()
+                .chain(candidates.iter().filter(|path| !preferred.contains(*path)));
             let mut after = BTreeMap::new();
             let mut total = 0;
             for path in candidates {
-                let Ok(path) = canonical_output_path(&observed_session, &path, true) else {
+                let Ok(path) = canonical_output_path(&observed_session, path, true) else {
                     continue;
                 };
-                if let Some(snapshot) = read_snapshot(&path)? {
-                    total += snapshot.bytes.len();
-                    ensure!(
-                        total <= MAX_CAPTURE_BYTES,
-                        "Output observation exceeded 32 MiB"
-                    );
-                    after.insert(path, snapshot);
+                match read_snapshot(&path) {
+                    Ok(Some(snapshot)) if total + snapshot.bytes.len() <= MAX_CAPTURE_BYTES => {
+                        total += snapshot.bytes.len();
+                        after.insert(path, snapshot);
+                    }
+                    Ok(None) => {}
+                    Ok(Some(_)) => warnings.push(format!(
+                        "{}: Output observation exceeded 32 MiB",
+                        path.display()
+                    )),
+                    Err(error) => warnings.push(format!("{}: {error}", path.display())),
                 }
             }
-            Ok(after)
+            Ok((after, warnings))
         })
         .await??;
+        let (after, mut warnings) = after;
+        warnings.extend(capture.warnings.clone());
         for (path, after) in after {
-            let before = capture.before.get(&path);
-            let unchanged = before.is_some_and(|before| before.body == after.body);
-            if unchanged && before.is_some_and(|before| before.bytes == after.bytes) {
-                continue;
-            }
-            let _guard = self.storage.acquire_write_guard().await;
-            let pool = self.storage.pool().await?;
-            let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-            let history = history_in_tx(&mut tx, &path).await?;
-            let latest = history.last();
-            if latest.is_some_and(|latest| latest.content_hash == digest(&after.body)) {
-                if output_roots(&capture.session)
-                    .iter()
-                    .any(|root| path.starts_with(root))
-                {
-                    let bytes = annotated_snapshot(&path, &after.body, &history);
-                    if bytes != after.bytes {
-                        let session = capture.session.clone();
-                        let path = path.clone();
-                        let hash = after.hash;
-                        tokio::task::spawn_blocking(move || {
-                            replace_if_unchanged(&session, &path, &hash, &bytes)
-                        })
-                        .await??;
+            let result: Result<()> = async {
+                let before = capture.before.get(&path);
+                let unchanged = before.is_some_and(|before| before.body == after.body);
+                if unchanged && before.is_some_and(|before| before.bytes == after.bytes) {
+                    return Ok(());
+                }
+                let _guard = self.storage.acquire_write_guard().await;
+                let pool = self.storage.pool().await?;
+                let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+                let history = history_in_tx(&mut tx, &path).await?;
+                let latest = history.last();
+                if latest.is_some_and(|latest| latest.content_hash == digest(&after.body)) {
+                    if output_roots(&capture.session)
+                        .iter()
+                        .any(|root| path.starts_with(root))
+                    {
+                        let bytes = annotated_snapshot(&path, &after.body, &history);
+                        if bytes != after.bytes {
+                            let session = capture.session.clone();
+                            let path = path.clone();
+                            let hash = after.hash;
+                            tokio::task::spawn_blocking(move || {
+                                replace_if_unchanged(&session, &path, &hash, &bytes)
+                            })
+                            .await??;
+                        }
+                    }
+                    return Ok(());
+                }
+                if unchanged {
+                    return Ok(());
+                }
+                let concurrent = latest.is_some_and(|latest| {
+                    DateTime::parse_from_rfc3339(&latest.recorded_at)
+                        .is_ok_and(|recorded| recorded > capture.started_at)
+                        && before.is_none_or(|before| latest.content_hash != digest(&before.body))
+                });
+                if let Some(before) = before {
+                    if !history
+                        .iter()
+                        .any(|revision| revision.content_hash == digest(&before.body))
+                    {
+                        let baseline = revision(
+                            &history,
+                            &before.body,
+                            unknown_contributor(&capture.contributor),
+                            OutputRevisionAction::Baseline,
+                            OutputAttributionKind::Unknown,
+                            None,
+                        );
+                        insert_revision(&mut tx, &path, &baseline, &before.bytes).await?;
                     }
                 }
-                continue;
-            }
-            if unchanged {
-                continue;
-            }
-            let concurrent = latest.is_some_and(|latest| {
-                DateTime::parse_from_rfc3339(&latest.recorded_at)
-                    .is_ok_and(|recorded| recorded > capture.started_at)
-                    && before.is_none_or(|before| latest.content_hash != digest(&before.body))
-            });
-            if let Some(before) = before {
-                if !history
+                tx.commit().await?;
+                let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+                let history = history_in_tx(&mut tx, &path).await?;
+                let kind = if concurrent {
+                    OutputAttributionKind::Unknown
+                } else if direct.contains(&path) {
+                    OutputAttributionKind::Tool
+                } else {
+                    OutputAttributionKind::Observed
+                };
+                let contributor = if concurrent {
+                    unknown_contributor(&capture.contributor)
+                } else {
+                    capture.contributor.clone()
+                };
+                let action = if before.is_none() && history.is_empty() {
+                    OutputRevisionAction::Created
+                } else {
+                    OutputRevisionAction::Modified
+                };
+                let next = revision(&history, &after.body, contributor, action, kind, None);
+                let mut history = history;
+                history.push(next.clone());
+                let annotate = output_roots(&capture.session)
                     .iter()
-                    .any(|revision| revision.content_hash == digest(&before.body))
-                {
-                    let baseline = revision(
-                        &history,
-                        &before.body,
-                        unknown_contributor(&capture.contributor),
-                        OutputRevisionAction::Baseline,
-                        OutputAttributionKind::Unknown,
-                        None,
-                    );
-                    insert_revision(&mut tx, &path, &baseline, &before.bytes).await?;
+                    .any(|root| path.starts_with(root));
+                let bytes = if annotate {
+                    annotated_snapshot(&path, &after.body, &history)
+                } else {
+                    after.bytes.clone()
+                };
+                ensure!(
+                    bytes.len() <= MAX_OUTPUT_REVISION_BYTES,
+                    "Output with attribution exceeds the 8 MiB revision limit"
+                );
+                insert_revision(&mut tx, &path, &next, &bytes).await?;
+                let artifact = DiscoveredArtifact {
+                    display_path: path.to_string_lossy().into_owned(),
+                    resolved_path: path.to_string_lossy().into_owned(),
+                    base_working_dir: capture.session.working_dir.to_string_lossy().into_owned(),
+                    workspace_id: capture.session.workspace_id.clone(),
+                    mime_type: None,
+                    relation: if action == OutputRevisionAction::Created {
+                        SessionArtifactRelation::Created
+                    } else {
+                        SessionArtifactRelation::Modified
+                    },
+                    provenance: if direct.contains(&path) {
+                        SessionArtifactProvenance::BuiltInTool
+                    } else {
+                        SessionArtifactProvenance::ToolArgument
+                    },
+                    source_id: Some(capture.contributor.source_id.clone()),
+                };
+                let artifacts = [artifact];
+                SessionStorage::upsert_artifacts_in_tx(&mut tx, &capture.session.id, &artifacts)
+                    .await?;
+                if let Some(parent_id) = &capture.parent_session_id {
+                    SessionStorage::upsert_artifacts_in_tx(&mut tx, parent_id, &artifacts).await?;
                 }
+                tx.commit().await?;
+                if bytes != after.bytes {
+                    let session = capture.session.clone();
+                    let path = path.clone();
+                    let hash = after.hash;
+                    let bytes = bytes.clone();
+                    tokio::task::spawn_blocking(move || {
+                        replace_if_unchanged(&session, &path, &hash, &bytes)
+                    })
+                    .await??;
+                }
+                Ok(())
             }
-            tx.commit().await?;
-            let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
-            let history = history_in_tx(&mut tx, &path).await?;
-            let kind = if concurrent {
-                OutputAttributionKind::Unknown
-            } else if direct.contains(&path) {
-                OutputAttributionKind::Tool
-            } else {
-                OutputAttributionKind::Observed
-            };
-            let contributor = if concurrent {
-                unknown_contributor(&capture.contributor)
-            } else {
-                capture.contributor.clone()
-            };
-            let action = if before.is_none() && history.is_empty() {
-                OutputRevisionAction::Created
-            } else {
-                OutputRevisionAction::Modified
-            };
-            let next = revision(&history, &after.body, contributor, action, kind, None);
-            let mut history = history;
-            history.push(next.clone());
-            let annotate = output_roots(&capture.session)
-                .iter()
-                .any(|root| path.starts_with(root));
-            let bytes = if annotate {
-                annotated_snapshot(&path, &after.body, &history)
-            } else {
-                after.bytes.clone()
-            };
-            ensure!(
-                bytes.len() <= MAX_OUTPUT_REVISION_BYTES,
-                "Output with attribution exceeds the 8 MiB revision limit"
-            );
-            insert_revision(&mut tx, &path, &next, &bytes).await?;
-            if bytes != after.bytes {
-                let session = capture.session.clone();
-                let path = path.clone();
-                let hash = after.hash;
-                let bytes = bytes.clone();
-                tokio::task::spawn_blocking(move || {
-                    replace_if_unchanged(&session, &path, &hash, &bytes)
-                })
-                .await??;
+            .await;
+            if let Err(error) = result {
+                warnings.push(format!("{}: {error}", path.display()));
             }
-            let artifact = DiscoveredArtifact {
-                display_path: path.to_string_lossy().into_owned(),
-                resolved_path: path.to_string_lossy().into_owned(),
-                base_working_dir: capture.session.working_dir.to_string_lossy().into_owned(),
-                workspace_id: capture.session.workspace_id.clone(),
-                mime_type: None,
-                relation: if action == OutputRevisionAction::Created {
-                    SessionArtifactRelation::Created
-                } else {
-                    SessionArtifactRelation::Modified
-                },
-                provenance: if direct.contains(&path) {
-                    SessionArtifactProvenance::BuiltInTool
-                } else {
-                    SessionArtifactProvenance::ToolArgument
-                },
-                source_id: Some(capture.contributor.source_id.clone()),
-            };
-            let artifacts = [artifact];
-            SessionStorage::upsert_artifacts_in_tx(&mut tx, &capture.session.id, &artifacts)
-                .await?;
-            if let Some(parent_id) = &capture.parent_session_id {
-                SessionStorage::upsert_artifacts_in_tx(&mut tx, parent_id, &artifacts).await?;
-            }
-            tx.commit().await?;
         }
+        ensure!(
+            warnings.is_empty(),
+            "Output history partially recorded ({} warnings): {}",
+            warnings.len(),
+            warnings
+                .iter()
+                .take(10)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("; ")
+        );
         Ok(())
     }
 
@@ -344,12 +388,21 @@ impl SessionManager {
         let requested = path.to_string();
         let scope = session.clone();
         let resolved = tokio::task::spawn_blocking(move || {
-            canonical_output_path(&scope, Path::new(&requested), write)
+            canonical_output_path(&scope, Path::new(&requested), write).map_err(|error| {
+                if error.downcast_ref::<std::io::Error>().is_some() {
+                    error
+                } else {
+                    OutputRevisionError::Validation(error.to_string()).into()
+                }
+            })
         })
         .await??;
         let registered: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM session_artifacts WHERE session_id = ? AND (resolved_path = ? OR resolved_path = ?))")
             .bind(session_id).bind(path).bind(resolved.to_string_lossy().as_ref()).fetch_one(self.storage.pool().await?).await?;
-        ensure!(registered, "File is not an output of this session");
+        ensure!(
+            registered,
+            OutputRevisionError::NotFound("File is not an output of this session".into())
+        );
         Ok((session, resolved))
     }
 
@@ -417,11 +470,15 @@ impl SessionManager {
         let current = tokio::task::spawn_blocking(move || read_snapshot(&snapshot_path))
             .await??
             .ok_or_else(|| {
-                anyhow::anyhow!("Output no longer exists; export the saved revision instead")
+                OutputRevisionError::NotFound(
+                    "Output no longer exists; export the saved revision instead".into(),
+                )
             })?;
         ensure!(
             current.hash == request.expected_current_hash,
-            "Output changed; refresh its history before restoring"
+            OutputRevisionError::Conflict(
+                "Output changed; refresh its history before restoring".into()
+            )
         );
         let content: Vec<u8> = sqlx::query_scalar(
             "SELECT content FROM output_revisions WHERE path = ? AND version = ?",
@@ -453,7 +510,7 @@ impl SessionManager {
             );
             insert_revision(&mut tx, &path, &baseline, &current.bytes).await?;
         }
-        // Baseline and restore must both roll back if the file cannot be replaced.
+        // Stage the file before committing; durable snapshots must precede replacement.
         let mut history = history_in_tx(&mut tx, &path).await?;
         let body = markdown_body(&path, &content);
         let next = revision(
@@ -475,15 +532,19 @@ impl SessionManager {
         };
         ensure!(
             bytes.len() <= MAX_OUTPUT_REVISION_BYTES,
-            "Output with attribution exceeds the 8 MiB revision limit"
+            OutputRevisionError::Limit(
+                "Output with attribution exceeds the 8 MiB revision limit".into()
+            )
         );
         insert_revision(&mut tx, &path, &next, &bytes).await?;
         let expected = request.expected_current_hash;
-        tokio::task::spawn_blocking(move || {
-            replace_if_unchanged(&session, &path, &expected, &bytes)
+        let replacement = tokio::task::spawn_blocking(move || {
+            prepare_replacement(&session, &path, &expected, &bytes)
         })
         .await??;
         tx.commit().await?;
+        tokio::task::spawn_blocking(move || replacement.persist()).await?
+            .map_err(|error| error.context("Restore snapshots saved, but file replacement failed; refresh history before retrying"))?;
         Ok(RestoreOutputRevisionResponse { revision: next })
     }
 }
@@ -500,7 +561,7 @@ async fn history_in_tx(
     .await?;
     ensure!(
         rows.len() <= 1000,
-        "Output has reached the 1000-revision capture limit"
+        OutputRevisionError::Limit("Output has reached the 1000-revision capture limit".into())
     );
     Ok(rows
         .into_iter()
@@ -546,7 +607,7 @@ async fn insert_revision(
 ) -> Result<()> {
     ensure!(
         revision.version <= 1000,
-        "Output has reached the 1000-revision capture limit"
+        OutputRevisionError::Limit("Output has reached the 1000-revision capture limit".into())
     );
     sqlx::query("INSERT INTO output_revisions(path, version, event_id, metadata_json, content) VALUES (?, ?, ?, ?, ?)")
         .bind(path.to_string_lossy().as_ref()).bind(revision.version)

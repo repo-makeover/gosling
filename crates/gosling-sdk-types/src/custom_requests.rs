@@ -861,6 +861,7 @@ pub enum OutputAttributionKind {
 pub struct OutputRevisionDto {
     pub version: i64,
     pub recorded_at: String,
+    /// SHA-256 of document body bytes, excluding a recognized managed Markdown footer.
     pub content_hash: String,
     pub size_bytes: usize,
     pub action: OutputRevisionAction,
@@ -900,6 +901,7 @@ pub struct GetOutputRevisionRequest {
 pub struct GetOutputRevisionResponse {
     pub revision: OutputRevisionDto,
     pub content_base64: String,
+    /// SHA-256 of all current on-disk bytes, including the footer; absent if missing.
     pub current_hash: Option<String>,
 }
 
@@ -910,6 +912,7 @@ pub struct RestoreOutputRevisionRequest {
     pub session_id: String,
     pub path: String,
     pub version: i64,
+    /// Use currentHash from revision retrieval, not revision.contentHash.
     pub expected_current_hash: String,
 }
 

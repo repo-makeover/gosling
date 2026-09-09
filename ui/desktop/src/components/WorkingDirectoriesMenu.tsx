@@ -212,6 +212,26 @@ export default function WorkingDirectoriesMenu({
     return null;
   }
 
+  const accessLabel = (path: string) => {
+    const normalize = (value: string) => {
+      const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
+      return /^[a-z]:\//i.test(normalized) ? normalized.toLowerCase() : normalized;
+    };
+    const roots = session.workspace_folder_roots ?? [];
+    const normalized = normalize(path);
+    const readOnly = roots.some(
+      (root) =>
+        root.access === 'read' &&
+        (normalized === normalize(root.path) || normalized.startsWith(`${normalize(root.path)}/`))
+    );
+    if (readOnly) return 'Read-only';
+    return roots.some((root) => normalize(root.path) === normalized)
+      ? 'Read/write/run'
+      : isWorkspacePinned
+        ? 'Workspace policy'
+        : 'Read/write/run';
+  };
+
   const filteredRecentDirs = recentDirs.filter(
     (dir) => dir && dir !== workingDir && !additionalWorkingDirs.includes(dir)
   );
@@ -247,7 +267,7 @@ export default function WorkingDirectoriesMenu({
               <Folder className="mr-2 h-4 w-4" />
               <span className="truncate flex-1">{workingDir}</span>
               <span className="ml-2 text-[10px] uppercase text-text-secondary">
-                {intl.formatMessage(i18n.primary)}
+                {intl.formatMessage(i18n.primary)} · {accessLabel(workingDir)}
               </span>
             </DropdownMenuItem>
 
@@ -257,6 +277,7 @@ export default function WorkingDirectoriesMenu({
                 <span className="truncate flex-1" title={dir}>
                   {dir}
                 </span>
+                <span className="text-[10px] text-text-secondary">{accessLabel(dir)}</span>
                 {!isWorkspacePinned && (
                   <button
                     type="button"

@@ -18,6 +18,7 @@ const i18n = defineMessages({
   history: { id: 'outputHistory.history', defaultMessage: 'History' },
   title: { id: 'outputHistory.title', defaultMessage: 'Output history' },
   loading: { id: 'outputHistory.loading', defaultMessage: 'Loading history…' },
+  noRevisions: { id: 'outputHistory.noRevisions', defaultMessage: 'No saved revisions' },
   unknown: { id: 'outputHistory.unknown', defaultMessage: 'Unknown' },
   empty: {
     id: 'outputHistory.empty',
@@ -58,7 +59,7 @@ const i18n = defineMessages({
   note: {
     id: 'outputHistory.note',
     defaultMessage:
-      'Observed changes identify the running agent, not exclusive authorship. Reading a file does not add authorship.',
+      'Observed changes identify the running agent, not exclusive authorship. Reading a file does not add authorship. Revisions belong to this file path and remain after Trash or chat deletion; later authorized chats can access them.',
   },
 });
 
@@ -106,6 +107,7 @@ export function OutputHistory({
   const [open, setOpen] = useState(false);
   const [latest, setLatest] = useState<OutputRevisionDto | null>(null);
   const [latestError, setLatestError] = useState(false);
+  const [latestLoaded, setLatestLoaded] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [revisions, setRevisions] = useState<OutputRevisionDto[]>([]);
   const [next, setNext] = useState<number | null>(null);
@@ -121,6 +123,9 @@ export function OutputHistory({
 
   useEffect(() => {
     if (!supported) return;
+    setLatest(null);
+    setLatestError(false);
+    setLatestLoaded(false);
     let controller = new AbortController();
     const load = () => {
       controller.abort();
@@ -131,6 +136,7 @@ export function OutputHistory({
           if (!signal.aborted) {
             setLatest(revision);
             setLatestError(false);
+            setLatestLoaded(true);
           }
         })
         .catch(() => {
@@ -177,21 +183,22 @@ export function OutputHistory({
     setSaved(null);
     setPrevious(null);
     setError(null);
-    void Promise.all([
-      getOutputRevision(sessionId, path, selected),
-      compare && selected > 1
-        ? getOutputRevision(sessionId, path, selected - 1)
-        : Promise.resolve(null),
-    ])
-      .then(([current, older]) => {
-        if (!canceled) {
-          setSaved(current);
-          setPrevious(older);
-        }
+    void getOutputRevision(sessionId, path, selected)
+      .then((current) => {
+        if (!canceled) setSaved(current);
       })
       .catch((reason) => {
         if (!canceled) setError(errorMessage(reason));
       });
+    if (compare && selected > 1) {
+      void getOutputRevision(sessionId, path, selected - 1)
+        .then((older) => {
+          if (!canceled) setPrevious(older);
+        })
+        .catch((reason) => {
+          if (!canceled) setError(errorMessage(reason));
+        });
+    }
     return () => {
       canceled = true;
     };
@@ -250,7 +257,9 @@ export function OutputHistory({
         >
           {latest
             ? `v${latest.version} · ${latest.contributor.agent} · ${latest.contributor.selectedModel ?? unknown}`
-            : intl.formatMessage(latestError ? i18n.unavailable : i18n.unknown)}
+            : intl.formatMessage(
+                latestError ? i18n.unavailable : latestLoaded ? i18n.noRevisions : i18n.loading
+              )}
         </span>
         <Button size="xs" variant="ghost" onClick={() => setOpen(true)}>
           <History className="h-3 w-3" />

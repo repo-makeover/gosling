@@ -18,6 +18,32 @@ describe('resolveStoredSettings', () => {
     );
   });
 
+  it('includes every saved-revision document type by default', () => {
+    for (const extension of [
+      'md',
+      'markdown',
+      'txt',
+      'csv',
+      'tsv',
+      'pdf',
+      'doc',
+      'docx',
+      'rtf',
+      'odt',
+      'xlsx',
+      'pptx',
+      'html',
+      'htm',
+      'png',
+      'jpg',
+      'jpeg',
+      'svg',
+      'webp',
+    ]) {
+      expect(defaultOutputFileExtensions).toContain(extension);
+    }
+  });
+
   it('migrates the legacy externalGoosed key without retaining its secret', () => {
     const result = resolveStoredSettings({
       externalGoosed: {

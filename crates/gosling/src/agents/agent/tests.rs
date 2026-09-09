@@ -1655,3 +1655,32 @@ fn auto_permission_filter_removes_tool_confirmation_and_keeps_other_content() {
         .iter()
         .all(|content| !matches!(content, MessageContent::ActionRequired(_))));
 }
+
+#[tokio::test]
+async fn policy_denial_preserves_inspector_reason() {
+    let agent = Agent::new();
+    let (mut permissions, mut responses) = needs_approval_fixture();
+    permissions.denied = std::mem::take(&mut permissions.needs_approval);
+    let inspections = vec![crate::tool_inspection::InspectionResult {
+        tool_request_id: "req-1".into(),
+        action: crate::tool_inspection::InspectionAction::Deny,
+        reason: "Workspace policy forbids mutation of read-only folders".into(),
+        confidence: 1.0,
+        inspector_name: "working_dir_scope".into(),
+        finding_id: None,
+        metadata: None,
+    }];
+    agent
+        .handle_approved_and_denied_tools(
+            &permissions,
+            &inspections,
+            &mut responses,
+            None,
+            &Session::default(),
+        )
+        .await
+        .unwrap();
+    let text = serde_json::to_string(&responses).unwrap();
+    assert!(text.contains("forbids mutation"));
+    assert!(!text.contains("user has declined"));
+}

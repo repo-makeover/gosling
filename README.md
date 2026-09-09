@@ -62,11 +62,10 @@ upstream commit, links the evidence, and records the refresh procedure.
 | **Separate app state** | Uses Goose's product namespace | Uses gosling's namespace, allowing both apps to coexist; `~/.agents` remains shared |
 
 gosling also provides Desktop workspace credential profiles and a session **Outputs**
-inventory. In `v1.2.2`, **Hide repository files** hides recognized source/project files
-and files within repository directories. See [Workspaces and Outputs](documentation/docs/guides/workspaces.md#product-outputs-and-exports)
+inventory. In `v1.2.2`, **Hide repository files** hides files within confirmed repository directories. See [Workspaces and Outputs](documentation/docs/guides/workspaces.md#product-outputs-and-exports)
 for extension settings, previews, and filter behavior.
 
-`v1.2.3` adds file timestamps, workspace readiness dots, output contributor/revision history,
+`v1.2.3` adds file timestamps, workspace unread-chat indicators, output contributor/revision history,
 and a separate **Copy contents** action for complete text documents. It also fixes modal layering
 and unnecessary workspace approval prompts for ordinary temporary scratch files.
 

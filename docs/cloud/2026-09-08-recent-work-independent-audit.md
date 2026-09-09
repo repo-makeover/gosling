@@ -802,3 +802,17 @@ Runtime races, kill drills, and live Desktop were not executed.
 - Involvement `L2` from request sophistication; autonomous execution of a read-only audit
 - Compacted ACP load is in scope as one hop from today’s `reply_entry.rs` auto-compact budget work
 - “Pause” in the verdict applies to Desktop auto-compact-after-resume until REL-GOS-001 is guarded, not to unrelated artifact UI
+
+## Repair addendum — 2026-09-08
+
+The historical audit above is preserved. All 20 findings in its Findings Table have
+been patched in the working tree based on `d9482f9d186c0449c3f0b394209d622507e7815c`.
+The [repair session record](../logs/session/2026-09-08-recent-audit-repairs.md)
+contains each original ID, changed behavior, regression evidence, contract amendment,
+and verification limits. The report's separately listed Deferred Risks remain deferred.
+
+Final disposition: **all 20 Findings Table IDs closed**. Verification passed: 1,932 Rust
+tests (3 ignored), 113 Desktop tests, scoped core/CLI Clippy, TypeScript, format/lint,
+and schema-description checks. Native Desktop, process-kill and other-platform drills
+were not run; see the linked record for the precise limits and revised restore boundary.
+Changes remain uncommitted; this addendum records working-tree evidence, not a release.

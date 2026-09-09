@@ -73,4 +73,25 @@ describe('WorkingDirectoriesMenu workspace session grants', () => {
     const update = onSessionChange.mock.calls[0][0] as (session: Session) => Session;
     expect(update(workspaceSession).additional_working_dirs).toEqual(['/private/workshop']);
   });
+
+  it('shows pinned read-only folder access', async () => {
+    const user = userEvent.setup();
+    render(
+      <WorkingDirectoriesMenu
+        session={{
+          ...workspaceSession,
+          additional_working_dirs: ['/workspace/reference'],
+          workspace_folder_roots: [
+            { path: '/workspace/project', access: 'read_write' },
+            { path: '/workspace/reference', access: 'read' },
+          ],
+        }}
+        onSessionChange={vi.fn()}
+      />,
+      { wrapper: IntlTestWrapper }
+    );
+    await user.click(screen.getByRole('button', { name: /Dirs/ }));
+    expect(await screen.findByText('Read-only')).toBeInTheDocument();
+    expect(screen.getByText('Primary · Read/write/run')).toBeInTheDocument();
+  });
 });

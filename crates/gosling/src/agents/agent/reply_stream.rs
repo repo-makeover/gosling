@@ -226,6 +226,7 @@ impl Agent {
                         &session_config,
                         &conversation,
                         auto_compact_budget,
+                        cancel_token.as_ref(),
                     ).await {
                         Ok(compacted_conversation) => {
                             conversation = compacted_conversation;
@@ -240,7 +241,7 @@ impl Agent {
                         Err(e) => {
                             yield AgentEvent::Message(
                                 Message::assistant()
-                                    .with_text(crate::context_mgmt::compaction_failure_message(&e))
+                                    .with_text(crate::context_mgmt::auto_compaction_failure_message(&e))
                             );
                             break;
                         }
@@ -608,6 +609,7 @@ impl Agent {
 
                                     let mut tool_futures = self.handle_approved_and_denied_tools(
                                         &permission_check_result,
+                                        &inspection_results,
                                         &mut request_to_response_map,
                                         cancel_token.clone(),
                                         &session,
@@ -823,6 +825,7 @@ impl Agent {
                                     // must fully resolve in one pass rather than take a soft,
                                     // budget-capped trim — same as a manual /compact.
                                     None,
+                                    cancel_token.as_ref(),
                                 )
                                 .await
                             {
@@ -838,7 +841,7 @@ impl Agent {
                                     error!("Compaction failed: {}", e);
                                     yield AgentEvent::Message(
                                         Message::assistant()
-                                            .with_text(crate::context_mgmt::compaction_failure_message(&e))
+                                            .with_text(crate::context_mgmt::auto_compaction_failure_message(&e))
                                             .with_terminal_error(e.to_string())
                                     );
                                     break;

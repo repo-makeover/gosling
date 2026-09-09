@@ -41,6 +41,7 @@ interface ArtifactWorkbenchValue {
   activeTab: ArtifactTab | null;
   activeTabId: string | null;
   artifacts: SessionArtifactDto[];
+  trashedArtifacts: SessionArtifactDto[];
   closeTab: (id: string) => void;
   forgetTrashedFiles: (paths: string[]) => void;
   hideRepositoryFiles: boolean;
@@ -139,6 +140,14 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
     () =>
       (artifactsBySession[visibleSessionId] ?? EMPTY_ARTIFACTS).filter(
         (artifact) => deletedArtifacts?.[artifact.resolvedPath] !== artifact.lastSeenAt
+      ),
+    [artifactsBySession, visibleSessionId, deletedArtifacts]
+  );
+
+  const trashedArtifacts = useMemo(
+    () =>
+      (artifactsBySession[visibleSessionId] ?? EMPTY_ARTIFACTS).filter(
+        (artifact) => deletedArtifacts?.[artifact.resolvedPath] === artifact.lastSeenAt
       ),
     [artifactsBySession, visibleSessionId, deletedArtifacts]
   );
@@ -363,6 +372,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
       activeTab,
       activeTabId: current.activeTabId,
       artifacts,
+      trashedArtifacts,
       closeTab,
       forgetTrashedFiles,
       hideRepositoryFiles,
@@ -384,6 +394,7 @@ export function ArtifactWorkbenchProvider({ children }: { children: React.ReactN
     [
       activeTab,
       artifacts,
+      trashedArtifacts,
       closeTab,
       forgetTrashedFiles,
       hideRepositoryFiles,

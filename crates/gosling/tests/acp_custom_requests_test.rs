@@ -872,6 +872,20 @@ fn test_custom_preferences_validate_resulting_compaction_pair() {
             openai,
         )
         .await;
+        for (key, value) in [
+            ("GOSLING_AUTO_COMPACT_REDUCTION", serde_json::json!(0.8)),
+            ("GOSLING_AUTO_COMPACT_THRESHOLD", serde_json::json!(0.15)),
+            ("GOSLING_AUTO_COMPACT_THRESHOLD", serde_json::json!(1.0)),
+            ("GOSLING_AUTO_COMPACT_REDUCTION", serde_json::json!("bad")),
+        ] {
+            assert!(send_custom(
+                conn.cx(),
+                "_gosling/unstable/config/upsert",
+                serde_json::json!({"key": key, "value": value, "isSecret": false})
+            )
+            .await
+            .is_err());
+        }
         for values in [
             serde_json::json!([{ "key": "autoCompactReduction", "value": 0.8 }]),
             serde_json::json!([{ "key": "autoCompactThreshold", "value": 0.15 }]),
@@ -978,6 +992,23 @@ fn test_custom_preferences_validate_resulting_compaction_pair() {
                 {"key": "autoCompactReduction", "value": 0.0}
             ]))
         );
+        assert!(send_custom(
+            conn.cx(),
+            "_gosling/unstable/config/remove",
+            serde_json::json!({"key": "GOSLING_AUTO_COMPACT_REDUCTION", "isSecret": false})
+        )
+        .await
+        .is_err());
+        send_custom(conn.cx(), "_gosling/unstable/config/upsert",
+            serde_json::json!({"key": "GOSLING_AUTO_COMPACT_THRESHOLD", "value": 0.0, "isSecret": false})).await.unwrap();
+        let disabled = send_custom(
+            conn.cx(),
+            "_gosling/unstable/config/read",
+            serde_json::json!({"key": "GOSLING_AUTO_COMPACT_THRESHOLD", "isSecret": false}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(disabled["value"], 0.0);
         send_custom(
             conn.cx(),
             "_gosling/unstable/preferences/remove",
@@ -998,7 +1029,7 @@ fn test_custom_preferences_save_rejects_invalid_values() {
 
         let invalid_payloads = [
             serde_json::json!({
-                "values": [{ "key": "autoCompactThreshold", "value": 0 }],
+                "values": [{ "key": "autoCompactThreshold", "value": 1.0 }],
             }),
             serde_json::json!({
                 "values": [{ "key": "autoCompactThreshold", "value": 1.1 }],

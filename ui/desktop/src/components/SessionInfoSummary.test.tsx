@@ -36,11 +36,7 @@ describe('SessionInfoSummary', () => {
   it('uses the workspace as its label and reveals concise chat metadata', () => {
     const onCollapse = vi.fn();
     render(
-      <SessionInfoSummary
-        session={session}
-        onSessionChange={vi.fn()}
-        onCollapse={onCollapse}
-      />
+      <SessionInfoSummary session={session} onSessionChange={vi.fn()} onCollapse={onCollapse} />
     );
 
     expect(screen.getByRole('region', { name: 'Chat information' })).toBeInTheDocument();
@@ -49,6 +45,10 @@ describe('SessionInfoSummary', () => {
     expect(screen.getByText('shared')).toBeInTheDocument();
     expect(screen.getByText('gpt-5.6')).toBeInTheDocument();
     expect(screen.getByText('Autonomous')).toBeInTheDocument();
+    expect(screen.getByText(/Workspace folder policy is enforced/)).toBeInTheDocument();
+    expect(
+      screen.queryByText('Tools are not restricted to the listed directories.')
+    ).not.toBeInTheDocument();
     expect(screen.getByText('12.5K')).toBeInTheDocument();
     expect(screen.getByText('$1.23')).toBeInTheDocument();
 

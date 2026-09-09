@@ -99,7 +99,7 @@ describe('WorkspaceSidebarSection', () => {
   });
 
   it('renders the active workspace and its actionable warning accessibly', () => {
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} unreadWorkspaceIds={new Set()} />, {
       wrapper: IntlTestWrapper,
     });
 
@@ -112,7 +112,7 @@ describe('WorkspaceSidebarSection', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows the ready dot on the matching workspace even when another workspace is selected', () => {
+  it('shows the unread chat icon on the matching workspace even when another workspace is selected', () => {
     const context = vi.mocked(useWorkspace)();
     vi.mocked(useWorkspace).mockReturnValue({
       ...context,
@@ -128,7 +128,7 @@ describe('WorkspaceSidebarSection', () => {
     const { rerender } = render(
       <WorkspaceSidebarSection
         onNewChat={startNewChat}
-        readyWorkspaceIds={new Set([workspace.id])}
+        unreadWorkspaceIds={new Set([workspace.id])}
       />,
       { wrapper: IntlTestWrapper }
     );
@@ -146,12 +146,12 @@ describe('WorkspaceSidebarSection', () => {
     expect(setSessionWorkspaceFilterId).toHaveBeenCalledWith(workspace.id);
     expect(within(row).getByRole('img', { name: readyLabel })).toBeInTheDocument();
 
-    rerender(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />);
+    rerender(<WorkspaceSidebarSection onNewChat={startNewChat} unreadWorkspaceIds={new Set()} />);
     expect(screen.queryByRole('img', { name: readyLabel })).not.toBeInTheDocument();
   });
 
   it('opens the create workflow and supports the all-workspaces session filter', () => {
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} unreadWorkspaceIds={new Set()} />, {
       wrapper: IntlTestWrapper,
     });
 
@@ -164,7 +164,7 @@ describe('WorkspaceSidebarSection', () => {
 
   it('filters chats on row click and starts a workspace-preselected chat only from its add action', async () => {
     const user = userEvent.setup();
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} unreadWorkspaceIds={new Set()} />, {
       wrapper: IntlTestWrapper,
     });
 
@@ -180,7 +180,7 @@ describe('WorkspaceSidebarSection', () => {
   it('exposes edit, duplicate, reveal, export, and delete actions', async () => {
     const user = userEvent.setup();
     duplicateWorkspace.mockResolvedValue(workspace);
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} unreadWorkspaceIds={new Set()} />, {
       wrapper: IntlTestWrapper,
     });
 
@@ -208,7 +208,7 @@ describe('WorkspaceSidebarSection', () => {
       showMessageBox: vi.fn().mockResolvedValue({ response: 1 }),
     });
     deleteWorkspace.mockResolvedValue(undefined);
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} unreadWorkspaceIds={new Set()} />, {
       wrapper: IntlTestWrapper,
     });
 
@@ -227,7 +227,7 @@ describe('WorkspaceSidebarSection', () => {
     const user = userEvent.setup();
     vi.mocked(acpExportWorkspace).mockResolvedValue('{"schemaVersion":1}\n');
     saveArtifact.mockResolvedValue({ canceled: false });
-    render(<WorkspaceSidebarSection onNewChat={startNewChat} readyWorkspaceIds={new Set()} />, {
+    render(<WorkspaceSidebarSection onNewChat={startNewChat} unreadWorkspaceIds={new Set()} />, {
       wrapper: IntlTestWrapper,
     });
 

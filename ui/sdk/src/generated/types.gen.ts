@@ -2129,6 +2129,9 @@ export type ListOutputRevisionsResponse_unstable = {
 export type OutputRevisionDto = {
     version: number;
     recordedAt: string;
+    /**
+     * SHA-256 of document body bytes, excluding a recognized managed Markdown footer.
+     */
     contentHash: string;
     sizeBytes: number;
     action: OutputRevisionAction;
@@ -2160,6 +2163,9 @@ export type GetOutputRevisionRequest_unstable = {
 export type GetOutputRevisionResponse_unstable = {
     revision: OutputRevisionDto;
     contentBase64: string;
+    /**
+     * SHA-256 of all current on-disk bytes, including the footer; absent if missing.
+     */
     currentHash?: string | null;
 };
 
@@ -2167,6 +2173,9 @@ export type RestoreOutputRevisionRequest_unstable = {
     sessionId: string;
     path: string;
     version: number;
+    /**
+     * Use currentHash from revision retrieval, not revision.contentHash.
+     */
     expectedCurrentHash: string;
 };
 

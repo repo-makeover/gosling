@@ -820,3 +820,129 @@ async fn failed_restore_does_not_commit_the_external_edit_baseline() {
         .unwrap();
     assert_eq!(history.revisions.len(), 1);
 }
+
+#[tokio::test]
+async fn oversized_sibling_does_not_abort_small_output_capture() {
+    let fixture = Fixture::new().await;
+    let huge = fixture.path.with_file_name("huge.pdf");
+    fs::write(&huge, vec![b'x'; 8 * 1024 * 1024 + 1]).unwrap();
+    let call = CallToolRequestParams::new("developer__write")
+        .with_arguments(rmcp::object!({"path": fixture.path.to_string_lossy()}));
+    let capture = fixture
+        .prepare(&fixture.session, "small", "model", &call)
+        .await;
+    fs::write(&fixture.path, "Small document").unwrap();
+    let error = fixture
+        .manager
+        .finish_output_capture(capture, &CallToolResult::success(vec![]))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("8 MiB"));
+    assert_eq!(fixture.history().await.len(), 1);
+    assert!(fs::read_to_string(&fixture.path)
+        .unwrap()
+        .starts_with("Small document"));
+}
+
+#[tokio::test]
+async fn restore_commit_failure_leaves_live_bytes_unchanged() {
+    let fixture = Fixture::new().await;
+    fixture
+        .write(&fixture.session, "first", "model", "Original")
+        .await;
+    fs::write(&fixture.path, "Untracked precious edits").unwrap();
+    let current = fixture.get(1).await;
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        fixture
+            .temp
+            .path()
+            .join("state/sessions/sessions.db")
+            .display()
+    ))
+    .await
+    .unwrap();
+    sqlx::query("CREATE TABLE restore_commit_parent (id INTEGER PRIMARY KEY)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("CREATE TABLE restore_commit_failure (id INTEGER REFERENCES restore_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)").execute(&pool).await.unwrap();
+    sqlx::query("CREATE TRIGGER fail_restore_commit AFTER INSERT ON output_revisions WHEN json_extract(NEW.metadata_json, '$.action') = 'restored' BEGIN INSERT INTO restore_commit_failure VALUES (1); END").execute(&pool).await.unwrap();
+    let result = fixture
+        .manager
+        .restore_output_revision(RestoreOutputRevisionRequest {
+            session_id: fixture.session.id.clone(),
+            path: fixture.path.to_string_lossy().into(),
+            version: 1,
+            expected_current_hash: current.current_hash.unwrap(),
+        })
+        .await;
+    assert!(result.is_err());
+    assert_eq!(
+        fs::read_to_string(&fixture.path).unwrap(),
+        "Untracked precious edits"
+    );
+    assert_eq!(fixture.history().await.len(), 1);
+}
+
+#[tokio::test]
+async fn restore_uses_full_file_hash_not_body_hash() {
+    let fixture = Fixture::new().await;
+    fixture
+        .write(&fixture.session, "first", "model", "Original")
+        .await;
+    let current = fixture.get(1).await;
+    assert_ne!(
+        current.current_hash.as_deref(),
+        Some(current.revision.content_hash.as_str())
+    );
+    let mut request = RestoreOutputRevisionRequest {
+        session_id: fixture.session.id.clone(),
+        path: fixture.path.to_string_lossy().into(),
+        version: 1,
+        expected_current_hash: current.revision.content_hash,
+    };
+    assert!(fixture
+        .manager
+        .restore_output_revision(request.clone())
+        .await
+        .is_err());
+    request.expected_current_hash = current.current_hash.unwrap();
+    assert!(fixture
+        .manager
+        .restore_output_revision(request)
+        .await
+        .is_ok());
+}
+
+#[tokio::test]
+async fn per_file_storage_failure_does_not_abort_other_revisions() {
+    let fixture = Fixture::new().await;
+    let broken = fixture.path.with_file_name("broken.md");
+    let pool = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}",
+        fixture
+            .temp
+            .path()
+            .join("state/sessions/sessions.db")
+            .display()
+    ))
+    .await
+    .unwrap();
+    sqlx::query("CREATE TRIGGER reject_one_output BEFORE INSERT ON output_revisions WHEN NEW.path LIKE '%/broken.md' BEGIN SELECT RAISE(FAIL, 'per-file storage failure'); END")
+        .execute(&pool).await.unwrap();
+    let call = CallToolRequestParams::new("developer__write")
+        .with_arguments(rmcp::object!({"path": fixture.path.to_string_lossy()}));
+    let capture = fixture
+        .prepare(&fixture.session, "siblings", "model", &call)
+        .await;
+    fs::write(&broken, "Cannot record this file").unwrap();
+    fs::write(&fixture.path, "Record this file").unwrap();
+    let error = fixture
+        .manager
+        .finish_output_capture(capture, &CallToolResult::success(vec![]))
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("per-file storage failure"));
+    assert_eq!(fixture.history().await.len(), 1);
+}

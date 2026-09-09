@@ -52,7 +52,9 @@ fn warn_about_invalid_config_values() {
     }
 
     match config.get_param::<f64>("GOSLING_AUTO_COMPACT_THRESHOLD") {
-        Ok(threshold) if threshold != 0.0 && !(0.0..1.0).contains(&threshold) => {
+        Ok(threshold)
+            if gosling::context_mgmt::validate_compaction_settings(threshold, 0.0).is_err() =>
+        {
             eprintln!(
                 "Warning: Invalid GOSLING_AUTO_COMPACT_THRESHOLD: {threshold}. Use 0 to disable auto-compaction or a value greater than 0 and less than 1."
             );
@@ -66,7 +68,9 @@ fn warn_about_invalid_config_values() {
     }
 
     match config.get_param::<f64>("GOSLING_AUTO_COMPACT_REDUCTION") {
-        Ok(reduction) if reduction != 0.0 && !(0.0..1.0).contains(&reduction) => {
+        Ok(reduction)
+            if gosling::context_mgmt::validate_compaction_settings(0.0, reduction).is_err() =>
+        {
             eprintln!(
                 "Warning: Invalid GOSLING_AUTO_COMPACT_REDUCTION: {reduction}. Use 0 to always fully collapse on auto-compaction, or a value greater than 0 and less than 1."
             );
@@ -77,6 +81,19 @@ fn warn_about_invalid_config_values() {
             );
         }
         _ => {}
+    }
+    let threshold = config
+        .get_param::<f64>("GOSLING_AUTO_COMPACT_THRESHOLD")
+        .unwrap_or(gosling::context_mgmt::DEFAULT_COMPACTION_THRESHOLD);
+    let reduction = config
+        .get_param::<f64>("GOSLING_AUTO_COMPACT_REDUCTION")
+        .unwrap_or(gosling::context_mgmt::DEFAULT_AUTO_COMPACT_REDUCTION);
+    if threshold > 0.0 && reduction > 0.0 && reduction >= threshold {
+        if let Err(error) =
+            gosling::context_mgmt::validate_compaction_settings(threshold, reduction)
+        {
+            eprintln!("Warning: Invalid auto-compaction settings: {error}");
+        }
     }
 }
 

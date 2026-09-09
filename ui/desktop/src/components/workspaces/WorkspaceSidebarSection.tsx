@@ -4,6 +4,7 @@ import {
   ChevronRight,
   FolderOpen,
   MoreHorizontal,
+  MessageCircle,
   Plus,
   TriangleAlert,
 } from 'lucide-react';
@@ -34,12 +35,12 @@ const i18n = defineMessages({
 
 interface WorkspaceSidebarSectionProps {
   onNewChat(workspaceId: string): void;
-  readyWorkspaceIds: ReadonlySet<string>;
+  unreadWorkspaceIds: ReadonlySet<string>;
 }
 
 export function WorkspaceSidebarSection({
   onNewChat,
-  readyWorkspaceIds,
+  unreadWorkspaceIds,
 }: WorkspaceSidebarSectionProps) {
   const { saveArtifact } = useArtifactRouter();
   const {
@@ -182,7 +183,7 @@ export function WorkspaceSidebarSection({
                   item={item}
                   filtered={item.workspace.id === sessionWorkspaceFilterId}
                   isDefault={item.workspace.id === defaultWorkspaceId}
-                  hasReadyChat={readyWorkspaceIds.has(item.workspace.id)}
+                  hasUnreadChat={unreadWorkspaceIds.has(item.workspace.id)}
                   onFilter={() => setSessionWorkspaceFilterId(item.workspace.id)}
                   onNewChat={() => onNewChat(item.workspace.id)}
                   onEdit={() => setEditor({ open: true, workspace: item.workspace })}
@@ -260,7 +261,7 @@ function WorkspaceRow({
   item,
   filtered,
   isDefault,
-  hasReadyChat,
+  hasUnreadChat,
   onFilter,
   onNewChat,
   onEdit,
@@ -272,7 +273,7 @@ function WorkspaceRow({
   item: WorkspaceWithValidation;
   filtered: boolean;
   isDefault: boolean;
-  hasReadyChat: boolean;
+  hasUnreadChat: boolean;
   onFilter(): void;
   onNewChat(): void;
   onEdit(): void;
@@ -297,13 +298,14 @@ function WorkspaceRow({
         <span className="flex size-5 items-center justify-center rounded bg-background-tertiary text-[10px] font-semibold uppercase">
           {(workspace.icon || workspace.name).slice(0, 2)}
         </span>
-        {hasReadyChat && (
+        {hasUnreadChat && (
           <span
             role="img"
-            className="size-2 shrink-0 rounded-full bg-green-500"
             aria-label={intl.formatMessage(i18n.chatReady)}
             title={intl.formatMessage(i18n.chatReady)}
-          />
+          >
+            <MessageCircle className="size-3 shrink-0 text-blue-500" aria-hidden="true" />
+          </span>
         )}
         <span className="min-w-0 flex-1 text-left">
           <span className="block truncate">{workspace.name}</span>

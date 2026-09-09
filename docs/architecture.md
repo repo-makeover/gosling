@@ -127,7 +127,7 @@ The Desktop loads the paginated inventory with the session and applies durable `
 notifications idempotently. Inventory metadata is backend-owned; the renderer presents entries
 whose extensions match the user's persisted Outputs display list. An in-app preview renderer is not
 required for listing, reveal, or external opening. The optional, remembered `Hide repository files`
-switch further excludes recognized source/project filenames and paths beneath Git, Mercurial, or
+switch further excludes paths beneath Git, Mercurial, or
 Subversion markers, including Git worktrees. Authorized ancestor-marker metadata checks determine
 repository membership; unavailable checks leave entries visible with a status. This filter changes
 the displayed inventory and count without removing metadata or closing previews. See ADR-0013 for
@@ -144,12 +144,15 @@ Outputs and Research Library lists also expose explicit single-file and batch Tr
 The file IPC handler checks each path with the artifact guard, rejects directories and symbolic
 links, and returns per-file outcomes without falling back to permanent unlink. Desktop closes
 successful previews and persists deleted Outputs versions as session presentation state; backend
-artifact provenance is retained. The Research Library list refreshes from its bounded disk scan.
+artifact provenance is retained. Removed Outputs expose saved revision export in a separate
+history section. The Research Library list refreshes from its bounded disk scan.
 
 Output contribution history is a separate core-owned service (ADR-0018, schema v32), not part of
 inventory listing. Successful hosted mutating tools capture bounded document changes and record
 message-level agent/model identity with append-only file snapshots. Desktop uses typed ACP requests
-for history, comparison, export, and hash-checked restore. Markdown products in configured output
+for history, revision retrieval, and hash-checked restore. Desktop compares fetched revisions.
+Exact-byte export uses Electron's
+`saveArtifact` bridge and the native save picker. Markdown products in configured output
 directories carry a managed history footer. Saved revisions persist independently of chat deletion;
 read-only references do not acquire authorship and external edits are not continuously watched.
 

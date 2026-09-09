@@ -120,7 +120,10 @@ The **Outputs** pane also shows a durable inventory for the visible session. Ent
 successful write/edit tools, local tool resources, explicit output metadata, and completed assistant
 file references appear automatically as `Outputs N`; clicking a message chip is not required. The list
 uses the extensions selected in **Settings → App → Output files**. The defaults are `.pdf`, `.md`,
-`.txt`, `.doc`, `.docx`, `.jpg`, `.png`, `.yaml`, and `.json`. Add extensions such as `.rs`, `.ts`,
+`.txt`, `.doc`, `.docx`, `.jpg`, `.png`, `.yaml`, `.json`, `.markdown`, `.csv`, `.tsv`,
+`.rtf`, `.odt`, `.xlsx`, `.pptx`, `.html`, `.htm`, `.jpeg`, `.svg`, and `.webp`.
+The pane reports how many outputs the extension filter hides. Existing customized lists stay unchanged.
+Add extensions such as `.rs`, `.ts`,
 `.py`, `.sh`, or `.toml` to include code/configuration files. Files without an in-app preview can
 still appear for reveal or external opening. Switching chats immediately switches the list. Missing
 files that match the display filters remain named after restart or resume so they cannot be confused
@@ -139,18 +142,15 @@ metadata never receive that automatic capability.
 
 In the Outputs pane, enable **Hide repository files** to hide:
 
-- recognized source-code files, such as `.rs`, `.ts`, `.py`, and `.sh`;
-- recognized project files, such as `Cargo.toml`, `package.json`, and `requirements.txt`;
 - files inside Git, Mercurial, or Subversion repository directories, including Git worktrees.
 
 The switch is off by default and remembers its setting. It applies after the extension filter and
 updates the visible list/count, with a separate count of hidden entries. A report saved inside a
 repository is hidden too; turn the switch off to see it again. Ordinary documents and data outside
-repositories remain visible unless their filename identifies a project file.
+repositories remain visible regardless of their extension.
 
 Repository membership is checked only for files gosling is authorized to inspect. If it cannot be
-checked, the pane shows a status and keeps those entries visible unless their filename already
-identifies source/project content. Filtering preserves files, stored inventory, and open preview tabs.
+checked, the pane shows a status and keeps those entries visible. Filtering preserves files, stored inventory, and open preview tabs.
 It changes presentation only; it does not change file access or the agent's working folders.
 
 ### File timestamps
@@ -175,7 +175,10 @@ products start with unknown attribution; reading or referencing a file does not 
 Select a revision to preview it, compare text with its previous revision, or **Export revision** to
 save its original bytes. **Restore revision** asks for confirmation, preserves current contents, and
 adds a new revision. If the file changed since you opened history, refresh before restoring. A
-missing file can be exported from history but is not recreated by restore.
+missing file can be exported from history but is not recreated by restore. After Trash, expand
+**Saved history for removed outputs** to export revisions. Restore the live file from OS Trash
+before using **Restore revision**. Saved history belongs to the path and can be available to later
+authorized chats that register that same path.
 
 Markdown reports in configured output folders or the working directory's `Outputs` folder also
 contain a contribution-history footer. Other formats retain their contents. History begins with new

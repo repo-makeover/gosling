@@ -23,8 +23,8 @@ const i18n = defineMessages({
   selectAll: { id: 'artifactFiles.selectAll', defaultMessage: 'Select all' },
   clear: { id: 'artifactFiles.clear', defaultMessage: 'Clear selection' },
   selected: { id: 'artifactFiles.selected', defaultMessage: '{count} selected' },
-  delete: { id: 'artifactFiles.delete', defaultMessage: 'Delete {name}' },
-  deleteSelected: { id: 'artifactFiles.deleteSelected', defaultMessage: 'Delete selected' },
+  delete: { id: 'artifactFiles.delete', defaultMessage: 'Move {name} to Trash' },
+  deleteSelected: { id: 'artifactFiles.deleteSelected', defaultMessage: 'Move selected to Trash' },
   created: { id: 'artifactFiles.created', defaultMessage: 'Created: {timestamp}' },
   modified: { id: 'artifactFiles.modified', defaultMessage: 'Modified: {timestamp}' },
   unknownTime: { id: 'artifactFiles.unknownTime', defaultMessage: 'Unavailable' },
@@ -43,7 +43,7 @@ const i18n = defineMessages({
   description: {
     id: 'artifactFiles.description',
     defaultMessage:
-      'These files will be removed from their current locations. You can restore them from Trash. Other copies are kept.',
+      'These files will be removed from their current locations. You can restore them from Trash. Other copies and saved revisions are kept. Removed Outputs remain available under Saved history for removed outputs.',
   },
   cancel: { id: 'artifactFiles.cancel', defaultMessage: 'Cancel' },
   confirm: { id: 'artifactFiles.confirm', defaultMessage: 'Move to Trash' },
@@ -60,7 +60,7 @@ const i18n = defineMessages({
   failed: {
     id: 'artifactFiles.failed',
     defaultMessage:
-      'Unable to delete {count, plural, one {# file} other {# files}}. See the errors beside each item.',
+      'Unable to move {count, plural, one {# file} other {# files}} to Trash. See the errors beside each item.',
   },
 });
 

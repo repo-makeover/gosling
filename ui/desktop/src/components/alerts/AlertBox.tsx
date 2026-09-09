@@ -71,7 +71,9 @@ const EditablePercentPreference = ({
   const { read, upsert } = useConfig();
   const [isEditing, setIsEditing] = useState(false);
   const [loadedValue, setLoadedValue] = useState<number>(defaultValue);
-  const [percentValue, setPercentValue] = useState(Math.max(minPercent, Math.round(defaultValue * 100)));
+  const [percentValue, setPercentValue] = useState(
+    Math.max(minPercent, Math.round(defaultValue * 100))
+  );
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -95,7 +97,7 @@ const EditablePercentPreference = ({
   const handleSave = async () => {
     if (isSaving) return; // Prevent double-clicks
 
-    const validValue = Math.max(minPercent, Math.min(100, percentValue));
+    const validValue = Math.max(minPercent, Math.min(99, percentValue));
     if (validValue !== percentValue) {
       setPercentValue(validValue);
     }
@@ -133,7 +135,7 @@ const EditablePercentPreference = ({
           <input
             type="number"
             min={minPercent}
-            max="100"
+            max="99"
             step="1"
             value={percentValue}
             onChange={(e) => {
@@ -141,15 +143,15 @@ const EditablePercentPreference = ({
               if (e.target.value === '') {
                 setPercentValue(minPercent);
               } else if (!isNaN(val)) {
-                setPercentValue(Math.max(minPercent, Math.min(100, val)));
+                setPercentValue(Math.max(minPercent, Math.min(99, val)));
               }
             }}
             onBlur={(e) => {
               const val = parseInt(e.target.value, 10);
               if (isNaN(val) || val < minPercent) {
                 setPercentValue(minPercent);
-              } else if (val > 100) {
-                setPercentValue(100);
+              } else if (val > 99) {
+                setPercentValue(99);
               }
             }}
             onKeyDown={(e) => {
@@ -188,7 +190,12 @@ const EditablePercentPreference = ({
       ) : (
         <>
           <span className="text-[10px] opacity-70">
-            {label} {Math.round(loadedValue * 100)}%
+            {label}{' '}
+            {loadedValue === 0
+              ? configKey === 'GOSLING_AUTO_COMPACT_THRESHOLD'
+                ? 'Disabled'
+                : 'Full compaction'
+              : `${Math.round(loadedValue * 100)}%`}
           </span>
           <button
             type="button"
@@ -218,7 +225,7 @@ export const AlertBox = ({ alert, className }: AlertBoxProps) => {
           <EditablePercentPreference
             configKey="GOSLING_AUTO_COMPACT_THRESHOLD"
             defaultValue={0.8}
-            minPercent={1}
+            minPercent={0}
             label={intl.formatMessage(i18n.autoCompactAt)}
             failedMessage={(error) => intl.formatMessage(i18n.failedToSaveThreshold, { error })}
             onSaved={alert.onThresholdChange}

@@ -8,10 +8,16 @@ import { IntlTestWrapper } from '../../../i18n/test-utils';
 const renderWithIntl = (ui: React.ReactElement, options?: RenderOptions) =>
   render(ui, { wrapper: IntlTestWrapper, ...options });
 
+const configMocks = vi.hoisted(() => ({
+  read: vi.fn(),
+  upsert: vi.fn(),
+}));
+
 // Mock the ConfigContext
 vi.mock('../../ConfigContext', () => ({
   useConfig: () => ({
-    read: vi.fn().mockResolvedValue(0.8),
+    read: configMocks.read,
+    upsert: configMocks.upsert,
   }),
 }));
 
@@ -20,6 +26,36 @@ describe('AlertBox', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    configMocks.read.mockImplementation(async (key: string) =>
+      key.endsWith('THRESHOLD') ? 0.8 : 0.15
+    );
+    configMocks.upsert.mockResolvedValue(undefined);
+  });
+
+  it('keeps an invalid reduction open and surfaces the server rejection', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    configMocks.upsert.mockRejectedValueOnce(new Error('Reduction must be below threshold'));
+    renderWithIntl(
+      <AlertBox
+        alert={{ type: AlertType.Info, message: 'Context', progress: { current: 80, total: 100 } }}
+      />
+    );
+    await screen.findByText('Reduce by 15%');
+    const buttons = screen.getAllByRole('button');
+    fireEvent.click(buttons[1]);
+    const input = screen.getByRole('spinbutton');
+    expect(input).toHaveAttribute('max', '99');
+    fireEvent.change(input, { target: { value: '80' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await screen.findByRole('spinbutton');
+    await vi.waitFor(() =>
+      expect(alertSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Reduction must be below threshold')
+      )
+    );
+    expect(configMocks.upsert).toHaveBeenCalledWith('GOSLING_AUTO_COMPACT_REDUCTION', 0.8, false);
+    expect(screen.getByRole('spinbutton')).toBeInTheDocument();
+    alertSpy.mockRestore();
   });
 
   describe('Basic Rendering', () => {

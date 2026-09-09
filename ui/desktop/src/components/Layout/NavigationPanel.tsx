@@ -276,7 +276,7 @@ export const Navigation: React.FC<{ className?: string }> = ({ className }) => {
     useNavigationSessions();
 
   const [sessionStatuses, setSessionStatuses] = useState<Map<string, SessionStatus>>(new Map());
-  const readyWorkspaceIds = useMemo(
+  const unreadWorkspaceIds = useMemo(
     () =>
       new Set(
         [...sessionStatuses.values()]
@@ -585,7 +585,7 @@ export const Navigation: React.FC<{ className?: string }> = ({ className }) => {
         style={workspacesHeight === null ? undefined : { height: workspacesHeight }}
       >
         <WorkspaceSidebarSection
-          readyWorkspaceIds={readyWorkspaceIds}
+          unreadWorkspaceIds={unreadWorkspaceIds}
           onNewChat={(workspaceId) => navigate('/', { state: { initialWorkspaceId: workspaceId } })}
         />
       </div>

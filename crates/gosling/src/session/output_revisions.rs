@@ -15,6 +15,18 @@ pub(crate) const MAX_CAPTURE_BYTES: usize = 32 * 1024 * 1024;
 const HISTORY_START: &str = "\n\n<!-- gosling:output-history:start -->\n";
 const HISTORY_END: &str = "<!-- gosling:output-history:end -->\n";
 
+#[derive(Debug, thiserror::Error)]
+pub enum OutputRevisionError {
+    #[error("{0}")]
+    Validation(String),
+    #[error("{0}")]
+    NotFound(String),
+    #[error("{0}")]
+    Conflict(String),
+    #[error("{0}")]
+    Limit(String),
+}
+
 #[derive(Clone)]
 pub(crate) struct OutputSnapshot {
     pub bytes: Vec<u8>,
@@ -148,7 +160,7 @@ pub(crate) fn read_snapshot(path: &Path) -> Result<Option<OutputSnapshot>> {
     );
     ensure!(
         metadata.len() <= MAX_OUTPUT_REVISION_BYTES as u64,
-        "Output exceeds the 8 MiB revision limit"
+        OutputRevisionError::Limit("Output exceeds the 8 MiB revision limit".into())
     );
     ensure!(
         path.canonicalize()? == path,
@@ -172,7 +184,7 @@ pub(crate) fn read_snapshot(path: &Path) -> Result<Option<OutputSnapshot>> {
     );
     ensure!(
         bytes.len() <= MAX_OUTPUT_REVISION_BYTES,
-        "Output exceeds the 8 MiB revision limit"
+        OutputRevisionError::Limit("Output exceeds the 8 MiB revision limit".into())
     );
     let body = markdown_body(path, &bytes);
     Ok(Some(OutputSnapshot {
@@ -259,22 +271,45 @@ pub(crate) fn annotated_snapshot(
     result
 }
 
-pub(crate) fn replace_if_unchanged(
+pub(crate) struct PreparedOutputReplacement {
+    temporary: tempfile::NamedTempFile,
+    session: Session,
+    path: PathBuf,
+    expected_hash: String,
+}
+
+impl PreparedOutputReplacement {
+    pub(crate) fn persist(self) -> Result<()> {
+        check_replacement_target(&self.session, &self.path, &self.expected_hash)?;
+        self.temporary.persist(&self.path)?;
+        Ok(())
+    }
+}
+
+fn check_replacement_target(session: &Session, path: &Path, expected_hash: &str) -> Result<()> {
+    ensure!(
+        canonical_output_path(session, path, true)? == path,
+        OutputRevisionError::Conflict("Output path changed while recording history".into())
+    );
+    let current = read_snapshot(path)?
+        .ok_or_else(|| OutputRevisionError::NotFound("Output no longer exists".into()))?;
+    ensure!(
+        current.hash == expected_hash,
+        OutputRevisionError::Conflict(
+            "Output changed; refresh its history before restoring".into()
+        )
+    );
+    Ok(())
+}
+
+/// Stage and sync bytes without touching the live file, so SQLite can commit first.
+pub(crate) fn prepare_replacement(
     session: &Session,
     path: &Path,
     expected_hash: &str,
     bytes: &[u8],
-) -> Result<()> {
-    let resolved = canonical_output_path(session, path, true)?;
-    ensure!(
-        resolved == path,
-        "Output path changed while recording history"
-    );
-    let current = read_snapshot(path)?.ok_or_else(|| anyhow::anyhow!("Output no longer exists"))?;
-    ensure!(
-        current.hash == expected_hash,
-        "Output changed; refresh its history before restoring"
-    );
+) -> Result<PreparedOutputReplacement> {
+    check_replacement_target(session, path, expected_hash)?;
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Output has no parent"))?;
@@ -284,39 +319,80 @@ pub(crate) fn replace_if_unchanged(
         .set_permissions(fs::metadata(path)?.permissions())?;
     temporary.write_all(bytes)?;
     temporary.as_file().sync_all()?;
-    ensure!(
-        read_snapshot(path)?.is_some_and(|snapshot| snapshot.hash == expected_hash),
-        "Output changed while recording history"
-    );
-    temporary.persist(path)?;
-    Ok(())
+    check_replacement_target(session, path, expected_hash)?;
+    Ok(PreparedOutputReplacement {
+        temporary,
+        session: session.clone(),
+        path: path.to_owned(),
+        expected_hash: expected_hash.into(),
+    })
 }
 
-pub(crate) fn scan_output_roots(roots: &[PathBuf]) -> Result<BTreeSet<PathBuf>> {
+pub(crate) fn replace_if_unchanged(
+    session: &Session,
+    path: &Path,
+    expected_hash: &str,
+    bytes: &[u8],
+) -> Result<()> {
+    prepare_replacement(session, path, expected_hash, bytes)?.persist()
+}
+
+pub(crate) fn scan_output_roots(roots: &[PathBuf]) -> (BTreeSet<PathBuf>, Vec<String>) {
+    let mut warnings = Vec::new();
     let mut files = BTreeSet::new();
     let mut pending: Vec<_> = roots.iter().cloned().map(|root| (root, 0)).collect();
     let mut visited = 0;
     while let Some((directory, depth)) = pending.pop() {
-        for entry in fs::read_dir(directory)? {
-            let entry = entry?;
+        let entries = match fs::read_dir(&directory) {
+            Ok(entries) => entries,
+            Err(error) => {
+                warnings.push(format!("{}: {error}", directory.display()));
+                continue;
+            }
+        };
+        for entry in entries {
             visited += 1;
-            ensure!(
-                visited <= 2000,
-                "Output observation exceeded 2000 directory entries"
-            );
-            let kind = entry.file_type()?;
+            if visited > 2000 {
+                warnings.push("Output observation stopped at 2000 directory entries".into());
+                return (files, warnings);
+            }
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    warnings.push(error.to_string());
+                    continue;
+                }
+            };
+            let kind = match entry.file_type() {
+                Ok(kind) => kind,
+                Err(error) => {
+                    warnings.push(error.to_string());
+                    continue;
+                }
+            };
             if kind.is_symlink() {
                 continue;
             }
             if kind.is_dir() && depth < 4 && !entry.file_name().to_string_lossy().starts_with('.') {
                 pending.push((entry.path(), depth + 1));
+            } else if kind.is_dir()
+                && depth >= 4
+                && !entry.file_name().to_string_lossy().starts_with('.')
+            {
+                warnings.push(format!(
+                    "{}: Output observation stopped at four directory levels",
+                    entry.path().display()
+                ));
             } else if kind.is_file() && is_output_document(&entry.path()) {
+                if files.len() == 200 {
+                    warnings.push("Output observation stopped at 200 files".into());
+                    return (files, warnings);
+                }
                 files.insert(entry.path());
-                ensure!(files.len() <= 200, "Output observation exceeded 200 files");
             }
         }
     }
-    Ok(files)
+    (files, warnings)
 }
 
 #[cfg(test)]

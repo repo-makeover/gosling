@@ -52,6 +52,8 @@ struct SessionMeta<'a> {
     workspace_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     workspace_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    workspace_folder_roots: Vec<crate::workspace::WorkspaceFolderPolicyRoot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     credential_profile_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -96,6 +98,11 @@ impl<'a> From<&'a Session> for SessionMeta<'a> {
             restrict_tools_to_working_dirs: session.restrict_tools_to_working_dirs,
             workspace_id: session.workspace_id.as_deref(),
             workspace_name: session.workspace_name.as_deref(),
+            workspace_folder_roots: session
+                .workspace_context
+                .as_ref()
+                .map(|context| context.effective_folder_policy().roots)
+                .unwrap_or_default(),
             credential_profile_id: session.credential_profile_id.as_deref(),
             credential_profile_name: session.credential_profile_name.as_deref(),
             imported_untrusted: provenance.is_some(),
@@ -497,6 +504,24 @@ mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::SessionConfigKind;
     use test_case::test_case;
+
+    #[test]
+    fn session_meta_exposes_pinned_folder_access() {
+        let session = Session {
+            workspace_context: Some(crate::workspace::WorkspaceSessionContext {
+                folder_policy: crate::workspace::WorkspaceFolderPolicy {
+                    roots: vec![crate::workspace::WorkspaceFolderPolicyRoot {
+                        path: "/reference".into(),
+                        access: crate::workspace::WorkspaceFolderAccess::Read,
+                    }],
+                },
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let meta = session_meta(&session);
+        assert_eq!(meta["workspaceFolderRoots"][0]["access"], "read");
+    }
 
     #[test]
     fn session_meta_marks_deep_research_sessions() {
