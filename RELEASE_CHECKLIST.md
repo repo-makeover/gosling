@@ -1,7 +1,7 @@
 # gosling Release Checklist
 
 This is a maintainer-owned publish gate. Documentation preparation does not check
-any item automatically. The current candidate is `v1.2.1`; preserve published
+any item automatically. The current candidate is `v1.2.4`; preserve published
 historical tags rather than rewriting them.
 
 ## Version and source identity
