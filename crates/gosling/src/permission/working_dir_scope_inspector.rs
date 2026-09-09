@@ -693,6 +693,26 @@ fn unwrap_command_words(segment: &[String]) -> &[String] {
     words
 }
 
+/// The directory a `cd` segment would change to, if unambiguous. `cd -`
+/// (previous directory) and bare `cd` (home) are not tracked since this
+/// inspector has no notion of `OLDPWD` and `resolve` cannot express "home".
+fn cd_target(segment: &[String]) -> Option<&str> {
+    let words = unwrap_command_words(segment);
+    let executable = words.first()?;
+    let executable = Path::new(executable.as_str())
+        .file_name()
+        .and_then(|name| name.to_str())?;
+    if executable != "cd" {
+        return None;
+    }
+    let mut targets = words[1..].iter().filter(|word| !word.starts_with('-'));
+    let target = targets.next()?;
+    if targets.next().is_some() {
+        return None;
+    }
+    Some(target.as_str())
+}
+
 fn collect_shell_segment_paths(segment: &[String], working_dir: &Path, paths: &mut Vec<PathBuf>) {
     for token in segment.iter().skip(1) {
         if let Some(path) = path_from_shell_token(token) {
@@ -724,8 +744,12 @@ fn referenced_paths(tool_call: &CallToolRequestParams, working_dir: &Path) -> Ve
         }
     }
     if let Some(command) = args.get("command").and_then(|value| value.as_str()) {
+        let mut current_dir = working_dir.to_path_buf();
         for segment in analyze_shell(command).segments {
-            collect_shell_segment_paths(&segment.words, working_dir, &mut paths);
+            collect_shell_segment_paths(&segment.words, &current_dir, &mut paths);
+            if let Some(target) = cd_target(&segment.words) {
+                current_dir = normalize_resolved_path(resolve(target, &current_dir));
+            }
         }
     }
     paths
@@ -754,9 +778,13 @@ pub(crate) fn mutation_paths(
         return Vec::new();
     };
     let mut paths = Vec::new();
+    let mut current_dir = working_dir.to_path_buf();
     for segment in analyze_shell(command).segments {
         if !segment.read_only {
-            collect_shell_segment_paths(&segment.words, working_dir, &mut paths);
+            collect_shell_segment_paths(&segment.words, &current_dir, &mut paths);
+        }
+        if let Some(target) = cd_target(&segment.words) {
+            current_dir = normalize_resolved_path(resolve(target, &current_dir));
         }
     }
     paths
@@ -2108,5 +2136,51 @@ mod tests {
             .map(|result| result.tool_request_id.as_str())
             .collect();
         assert_eq!(flagged, vec!["write-outside", "awk-write-outside"]);
+    }
+
+    /// A multi-line script that `cd`s two levels deep and then reaches a
+    /// sibling with `../shared.txt` resolves relative to the directory the
+    /// prior `cd`s actually reached, not the session's original working
+    /// directory. Without this, `../shared.txt` was checked against
+    /// `working_dir/../shared.txt` (one level above the session root, out
+    /// of scope) instead of `components/shared.txt` (in scope), flagging a
+    /// false positive for ordinary nested navigation.
+    #[test]
+    fn tracks_cd_across_segments_for_later_relative_paths() {
+        let root = tempfile::tempdir().unwrap();
+        let working_dir = root.path().join("project");
+        std::fs::create_dir_all(working_dir.join("components/math_mcp")).unwrap();
+        let call = tool_call(
+            "developer__shell",
+            json_args(&[("command", "cd components\ncd math_mcp\ncat ../shared.txt")]),
+        );
+
+        assert_eq!(
+            out_of_scope_path(&call, &working_dir, std::slice::from_ref(&working_dir)).unwrap(),
+            None
+        );
+    }
+
+    /// The same script resolved without `cd` tracking against the fixed
+    /// working directory would flag `working_dir/../shared.txt`; confirm the
+    /// scope check still rejects a script that legitimately walks outside
+    /// the allowed roots after `cd`ing there.
+    #[test]
+    fn flags_cd_that_leaves_scope_before_later_relative_path() {
+        let root = tempfile::tempdir().unwrap();
+        let working_dir = root.path().join("project");
+        std::fs::create_dir_all(&working_dir).unwrap();
+        std::fs::create_dir_all(root.path().join("outside")).unwrap();
+        let call = tool_call(
+            "developer__shell",
+            json_args(&[("command", "cd ../outside\ncat notes.txt")]),
+        );
+
+        let result =
+            out_of_scope_path(&call, &working_dir, std::slice::from_ref(&working_dir)).unwrap();
+        assert_eq!(
+            result,
+            Some(canonicalize_potential_path(&root.path().join("outside")).unwrap())
+        );
     }
 }
