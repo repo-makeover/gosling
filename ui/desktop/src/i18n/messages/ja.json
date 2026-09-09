@@ -3532,5 +3532,11 @@
   },
   "artifactPane.copyContentsTextOnly": {
     "defaultMessage": "Copy contents is available for text documents"
+  },
+  "alertBox.autoCompactReduceBy": {
+    "defaultMessage": "Reduce by"
+  },
+  "alertBox.failedToSaveReduction": {
+    "defaultMessage": "Failed to save reduction: {error}"
   }
 }

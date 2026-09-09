@@ -263,6 +263,11 @@ const PREFERENCE_DEFS: &[PreferenceDef] = &[
         prepare: prepare_auto_compact_threshold,
     },
     PreferenceDef {
+        key: PreferenceKey::AutoCompactReduction,
+        config_key: "GOSLING_AUTO_COMPACT_REDUCTION",
+        prepare: prepare_auto_compact_reduction,
+    },
+    PreferenceDef {
         key: PreferenceKey::GoslingThinkingEffort,
         config_key: "GOSLING_THINKING_EFFORT",
         prepare: prepare_thinking_effort,
@@ -306,6 +311,21 @@ fn prepare_auto_compact_threshold(
     if !threshold.is_finite() || threshold <= 0.0 || threshold > 1.0 {
         return Err(agent_client_protocol::Error::invalid_params()
             .data("autoCompactThreshold must be greater than 0 and at most 1"));
+    }
+
+    Ok(value.clone())
+}
+
+fn prepare_auto_compact_reduction(
+    value: &serde_json::Value,
+) -> Result<serde_json::Value, agent_client_protocol::Error> {
+    let Some(reduction) = value.as_f64() else {
+        return Err(agent_client_protocol::Error::invalid_params()
+            .data("autoCompactReduction must be a number"));
+    };
+    if !reduction.is_finite() || !(0.0..1.0).contains(&reduction) {
+        return Err(agent_client_protocol::Error::invalid_params()
+            .data("autoCompactReduction must be at least 0 and less than 1"));
     }
 
     Ok(value.clone())

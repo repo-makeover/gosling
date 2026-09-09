@@ -1484,6 +1484,7 @@ export const zCanonicalModelInfoResponse_unstable = z.object({
 
 export const zPreferenceKey = z.enum([
     'autoCompactThreshold',
+    'autoCompactReduction',
     'goslingThinkingEffort',
     'voiceAutoSubmitPhrases',
     'voiceDictationProvider',

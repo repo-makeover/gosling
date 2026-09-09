@@ -1786,7 +1786,7 @@ export type PreferencesReadRequest_unstable = {
     keys?: Array<PreferenceKey>;
 };
 
-export type PreferenceKey = 'autoCompactThreshold' | 'goslingThinkingEffort' | 'voiceAutoSubmitPhrases' | 'voiceDictationProvider' | 'voiceDictationPreferredMic';
+export type PreferenceKey = 'autoCompactThreshold' | 'autoCompactReduction' | 'goslingThinkingEffort' | 'voiceAutoSubmitPhrases' | 'voiceDictationProvider' | 'voiceDictationPreferredMic';
 
 export type PreferencesReadResponse_unstable = {
     values: Array<PreferenceValue>;

@@ -2,8 +2,14 @@
   "alertBox.autoCompactAt": {
     "defaultMessage": "Auto compact at"
   },
+  "alertBox.autoCompactReduceBy": {
+    "defaultMessage": "Reduce by"
+  },
   "alertBox.compactNow": {
     "defaultMessage": "Compact now"
+  },
+  "alertBox.failedToSaveReduction": {
+    "defaultMessage": "Failed to save reduction: {error}"
   },
   "alertBox.failedToSaveThreshold": {
     "defaultMessage": "Failed to save threshold: {error}"

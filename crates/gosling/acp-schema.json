@@ -4436,6 +4436,7 @@
       "type": "string",
       "enum": [
         "autoCompactThreshold",
+        "autoCompactReduction",
         "goslingThinkingEffort",
         "voiceAutoSubmitPhrases",
         "voiceDictationProvider",

@@ -809,6 +809,57 @@ fn test_custom_preferences_read_save_remove() {
 
 #[test]
 #[serial]
+fn test_custom_preferences_read_save_auto_compact_reduction() {
+    let config_dir = write_acp_global_config(
+        "GOSLING_MODEL: gpt-4o\nGOSLING_PROVIDER: openai\nGOSLING_AUTO_COMPACT_REDUCTION: 0.15\n",
+    );
+
+    run_test(async move {
+        let openai = OpenAiFixture::new(vec![], Arc::new(EnforceSessionId::default())).await;
+        let config = TestConnectionConfig {
+            data_root: config_dir,
+            ..Default::default()
+        };
+        let conn = AcpServerConnection::new(config, openai).await;
+
+        let response = send_custom(
+            conn.cx(),
+            "_gosling/unstable/preferences/read",
+            serde_json::json!({ "keys": ["autoCompactReduction"] }),
+        )
+        .await
+        .expect("preferences read should succeed");
+        assert_eq!(
+            response.get("values"),
+            Some(&serde_json::json!([{ "key": "autoCompactReduction", "value": 0.15 }]))
+        );
+
+        send_custom(
+            conn.cx(),
+            "_gosling/unstable/preferences/save",
+            serde_json::json!({
+                "values": [{ "key": "autoCompactReduction", "value": 0.0 }],
+            }),
+        )
+        .await
+        .expect("preferences save should accept 0 (always fully collapse)");
+
+        let response = send_custom(
+            conn.cx(),
+            "_gosling/unstable/preferences/read",
+            serde_json::json!({ "keys": ["autoCompactReduction"] }),
+        )
+        .await
+        .expect("preferences read should succeed");
+        assert_eq!(
+            response.get("values"),
+            Some(&serde_json::json!([{ "key": "autoCompactReduction", "value": 0.0 }]))
+        );
+    });
+}
+
+#[test]
+#[serial]
 fn test_custom_preferences_save_rejects_invalid_values() {
     write_acp_global_config(DEFAULT_ACP_TEST_CONFIG);
     run_test(async {
@@ -821,6 +872,12 @@ fn test_custom_preferences_save_rejects_invalid_values() {
             }),
             serde_json::json!({
                 "values": [{ "key": "autoCompactThreshold", "value": 1.1 }],
+            }),
+            serde_json::json!({
+                "values": [{ "key": "autoCompactReduction", "value": -0.1 }],
+            }),
+            serde_json::json!({
+                "values": [{ "key": "autoCompactReduction", "value": 1.0 }],
             }),
             serde_json::json!({
                 "values": [{ "key": "goslingThinkingEffort", "value": "bogus" }],

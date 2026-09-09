@@ -557,6 +557,7 @@ pub struct ConfigReadAllResponse {
 pub enum PreferenceKey {
     #[default]
     AutoCompactThreshold,
+    AutoCompactReduction,
     GoslingThinkingEffort,
     VoiceAutoSubmitPhrases,
     VoiceDictationProvider,

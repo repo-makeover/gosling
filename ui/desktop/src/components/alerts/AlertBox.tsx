@@ -24,6 +24,10 @@ const i18n = defineMessages({
     id: 'alertBox.autoCompactAt',
     defaultMessage: 'Auto compact at',
   },
+  autoCompactReduceBy: {
+    id: 'alertBox.autoCompactReduceBy',
+    defaultMessage: 'Reduce by',
+  },
   compactNow: {
     id: 'alertBox.compactNow',
     defaultMessage: 'Compact now',
@@ -31,6 +35,10 @@ const i18n = defineMessages({
   failedToSaveThreshold: {
     id: 'alertBox.failedToSaveThreshold',
     defaultMessage: 'Failed to save threshold: {error}',
+  },
+  failedToSaveReduction: {
+    id: 'alertBox.failedToSaveReduction',
+    defaultMessage: 'Failed to save reduction: {error}',
   },
 });
 
@@ -40,56 +48,70 @@ const alertStyles: Record<AlertType, string> = {
   [AlertType.Info]: 'dark:bg-white dark:text-black bg-black text-white',
 };
 
-export const AlertBox = ({ alert, className }: AlertBoxProps) => {
-  const intl = useIntl();
+interface EditablePercentPreferenceProps {
+  configKey: string;
+  defaultValue: number;
+  minPercent: number;
+  label: string;
+  failedMessage: (error: string) => string;
+  onSaved?: (value: number) => void;
+}
+
+// Shared by the auto-compact threshold and reduction controls below: both are a
+// config value stored as a 0-1 fraction, edited in the UI as a whole percentage,
+// with the same load / inline-edit / save interaction.
+const EditablePercentPreference = ({
+  configKey,
+  defaultValue,
+  minPercent,
+  label,
+  failedMessage,
+  onSaved,
+}: EditablePercentPreferenceProps) => {
   const { read, upsert } = useConfig();
-  const [isEditingThreshold, setIsEditingThreshold] = useState(false);
-  const [loadedThreshold, setLoadedThreshold] = useState<number>(0.8);
-  const [thresholdValue, setThresholdValue] = useState(80);
+  const [isEditing, setIsEditing] = useState(false);
+  const [loadedValue, setLoadedValue] = useState<number>(defaultValue);
+  const [percentValue, setPercentValue] = useState(Math.max(minPercent, Math.round(defaultValue * 100)));
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    const loadThreshold = async () => {
+    const loadValue = async () => {
       try {
-        const threshold = await read('GOSLING_AUTO_COMPACT_THRESHOLD', false);
-        if (threshold !== undefined && threshold !== null && typeof threshold === 'number') {
-          setLoadedThreshold(threshold);
-          setThresholdValue(Math.max(1, Math.round(threshold * 100)));
+        const value = await read(configKey, false);
+        if (value !== undefined && value !== null && typeof value === 'number') {
+          setLoadedValue(value);
+          setPercentValue(Math.max(minPercent, Math.round(value * 100)));
         }
       } catch (err) {
-        console.error('Error fetching auto-compact threshold:', err);
+        console.error(`Error fetching ${configKey}:`, err);
       }
     };
 
-    loadThreshold();
+    loadValue();
+    // configKey/minPercent identify a single, unchanging control instance.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [read]);
 
-  const currentThreshold = loadedThreshold;
-
-  const handleSaveThreshold = async () => {
+  const handleSave = async () => {
     if (isSaving) return; // Prevent double-clicks
 
-    let validThreshold = Math.max(1, Math.min(100, thresholdValue));
-    if (validThreshold !== thresholdValue) {
-      setThresholdValue(validThreshold);
+    const validValue = Math.max(minPercent, Math.min(100, percentValue));
+    if (validValue !== percentValue) {
+      setPercentValue(validValue);
     }
 
     setIsSaving(true);
     try {
-      const newThreshold = validThreshold / 100; // Convert percentage to decimal
+      const newValue = validValue / 100; // Convert percentage to decimal
 
-      await upsert('GOSLING_AUTO_COMPACT_THRESHOLD', newThreshold, false);
+      await upsert(configKey, newValue, false);
 
-      setIsEditingThreshold(false);
-      setLoadedThreshold(newThreshold);
-
-      // Notify parent component of the threshold change
-      if (alert.onThresholdChange) {
-        alert.onThresholdChange(newThreshold);
-      }
+      setIsEditing(false);
+      setLoadedValue(newValue);
+      onSaved?.(newValue);
     } catch (error) {
-      console.error('Error saving threshold:', error);
-      window.alert(intl.formatMessage(i18n.failedToSaveThreshold, { error: errorMessage(error, 'Unknown error') }));
+      console.error(`Error saving ${configKey}:`, error);
+      window.alert(failedMessage(errorMessage(error, 'Unknown error')));
     } finally {
       setIsSaving(false);
     }
@@ -97,97 +119,117 @@ export const AlertBox = ({ alert, className }: AlertBoxProps) => {
 
   return (
     <div
-      className={cn('flex flex-col gap-2 px-3 py-3', alertStyles[alert.type], className)}
+      className="flex items-center justify-center gap-1 min-h-[20px]"
       onMouseDown={(e) => {
-        // Prevent popover from closing when clicking inside the alert box
-        if (isEditingThreshold) {
+        // Prevent a containing popover from closing when clicking inside this control.
+        if (isEditing) {
           e.stopPropagation();
         }
       }}
     >
+      {isEditing ? (
+        <>
+          <span className="text-[10px] opacity-70">{label}</span>
+          <input
+            type="number"
+            min={minPercent}
+            max="100"
+            step="1"
+            value={percentValue}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10);
+              if (e.target.value === '') {
+                setPercentValue(minPercent);
+              } else if (!isNaN(val)) {
+                setPercentValue(Math.max(minPercent, Math.min(100, val)));
+              }
+            }}
+            onBlur={(e) => {
+              const val = parseInt(e.target.value, 10);
+              if (isNaN(val) || val < minPercent) {
+                setPercentValue(minPercent);
+              } else if (val > 100) {
+                setPercentValue(100);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                handleSave();
+              } else if (e.key === 'Escape') {
+                setIsEditing(false);
+                setPercentValue(Math.max(minPercent, Math.round(loadedValue * 100)));
+              }
+            }}
+            onFocus={(e) => {
+              e.target.select();
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+            className="w-12 px-1 text-[10px] bg-white/10 border border-current/30 rounded outline-none text-center focus:bg-white/20 focus:border-current/50 transition-colors"
+            disabled={isSaving}
+            autoFocus
+          />
+          <span className="text-[10px] opacity-70">%</span>
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleSave();
+            }}
+            disabled={isSaving}
+            className="p-1 hover:opacity-60 transition-opacity cursor-pointer relative z-50"
+            style={{ minWidth: '20px', minHeight: '20px', pointerEvents: 'auto' }}
+          >
+            <FaSave className="w-3 h-3" />
+          </button>
+        </>
+      ) : (
+        <>
+          <span className="text-[10px] opacity-70">
+            {label} {Math.round(loadedValue * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setIsEditing(true);
+            }}
+            className="p-1 hover:opacity-60 transition-opacity cursor-pointer relative z-10"
+            style={{ minWidth: '20px', minHeight: '20px' }}
+          >
+            <FaPencilAlt className="w-3 h-3 opacity-70" />
+          </button>
+        </>
+      )}
+    </div>
+  );
+};
+
+export const AlertBox = ({ alert, className }: AlertBoxProps) => {
+  const intl = useIntl();
+
+  return (
+    <div className={cn('flex flex-col gap-2 px-3 py-3', alertStyles[alert.type], className)}>
       {alert.progress ? (
         <div className="flex flex-col gap-2">
-          {/* Auto-compact threshold indicator with edit */}
-          <div className="flex items-center justify-center gap-1 min-h-[20px]">
-            {isEditingThreshold ? (
-              <>
-                <span className="text-[10px] opacity-70">{intl.formatMessage(i18n.autoCompactAt)}</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="100"
-                  step="1"
-                  value={thresholdValue}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value, 10);
-                    if (e.target.value === '') {
-                      setThresholdValue(1);
-                    } else if (!isNaN(val)) {
-                      setThresholdValue(Math.max(1, Math.min(100, val)));
-                    }
-                  }}
-                  onBlur={(e) => {
-                    const val = parseInt(e.target.value, 10);
-                    if (isNaN(val) || val < 1) {
-                      setThresholdValue(1);
-                    } else if (val > 100) {
-                      setThresholdValue(100);
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleSaveThreshold();
-                    } else if (e.key === 'Escape') {
-                      setIsEditingThreshold(false);
-                      const resetValue = Math.round(currentThreshold * 100);
-                      setThresholdValue(Math.max(1, resetValue));
-                    }
-                  }}
-                  onFocus={(e) => {
-                    e.target.select();
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                  className="w-12 px-1 text-[10px] bg-white/10 border border-current/30 rounded outline-none text-center focus:bg-white/20 focus:border-current/50 transition-colors"
-                  disabled={isSaving}
-                  autoFocus
-                />
-                <span className="text-[10px] opacity-70">%</span>
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    handleSaveThreshold();
-                  }}
-                  disabled={isSaving}
-                  className="p-1 hover:opacity-60 transition-opacity cursor-pointer relative z-50"
-                  style={{ minWidth: '20px', minHeight: '20px', pointerEvents: 'auto' }}
-                >
-                  <FaSave className="w-3 h-3" />
-                </button>
-              </>
-            ) : (
-              <>
-                <span className="text-[10px] opacity-70">
-                  {intl.formatMessage(i18n.autoCompactAt)} {Math.round(currentThreshold * 100)}%
-                </span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setIsEditingThreshold(true);
-                  }}
-                  className="p-1 hover:opacity-60 transition-opacity cursor-pointer relative z-10"
-                  style={{ minWidth: '20px', minHeight: '20px' }}
-                >
-                  <FaPencilAlt className="w-3 h-3 opacity-70" />
-                </button>
-              </>
-            )}
-          </div>
+          <EditablePercentPreference
+            configKey="GOSLING_AUTO_COMPACT_THRESHOLD"
+            defaultValue={0.8}
+            minPercent={1}
+            label={intl.formatMessage(i18n.autoCompactAt)}
+            failedMessage={(error) => intl.formatMessage(i18n.failedToSaveThreshold, { error })}
+            onSaved={alert.onThresholdChange}
+          />
+          <EditablePercentPreference
+            configKey="GOSLING_AUTO_COMPACT_REDUCTION"
+            defaultValue={0.15}
+            minPercent={0}
+            label={intl.formatMessage(i18n.autoCompactReduceBy)}
+            failedMessage={(error) => intl.formatMessage(i18n.failedToSaveReduction, { error })}
+          />
           {alert.showCompactButton && alert.onCompact && (
             <button
               onClick={(e) => {
