@@ -250,8 +250,7 @@ fn temporary_scratch_dirs() -> Vec<PathBuf> {
         .collect()
 }
 
-fn is_within_any(path: &Path, dirs: &[PathBuf]) -> Result<bool> {
-    let canonical_path = canonicalize_potential_path(path)?;
+fn canonical_path_is_within_any(canonical_path: &Path, dirs: &[PathBuf]) -> Result<bool> {
     let canonical_dirs = canonical_allowed_dirs(dirs);
     if canonical_dirs.is_empty() {
         anyhow::bail!("no working directory could be canonicalized");
@@ -923,7 +922,7 @@ fn out_of_scope_path(
         {
             continue;
         }
-        if !is_within_any(resolved, allowed_dirs)? {
+        if !canonical_path_is_within_any(&canonical_path, allowed_dirs)? {
             return Ok(Some(canonical_path));
         }
     }

@@ -161,6 +161,44 @@ describe('live main artifact authorization', () => {
     expect(clipboard.writeText).not.toHaveBeenCalled();
   });
 
+  it('rejects a large binary after one bounded read', async () => {
+    const { invoke, launchRoot } = await createMainFileIpc();
+    const binary = path.join(launchRoot, 'large-binary.txt');
+    await fs.writeFile(binary, new Uint8Array([65, 0, 66]));
+    await fs.truncate(binary, 20 * 1024 * 1024);
+    const handle = await fs.open(binary, 'r');
+    const read = vi.spyOn(handle, 'read');
+    const close = vi.spyOn(handle, 'close');
+    const open = vi.spyOn(fs, 'open').mockResolvedValueOnce(handle);
+    try {
+      await expect(invoke('copy-artifact-contents', 7, binary)).rejects.toThrow('UTF-8');
+      expect(read).toHaveBeenCalledOnce();
+      expect(read.mock.calls[0][0]).toHaveLength(64 * 1024);
+      expect(close).toHaveBeenCalledOnce();
+      expect(clipboard.writeText).not.toHaveBeenCalled();
+    } finally {
+      open.mockRestore();
+      read.mockRestore();
+      close.mockRestore();
+    }
+  });
+
+  it('preserves split UTF-8 characters and rejects a malformed final chunk', async () => {
+    const { invoke, publish, reportPath } = await createMainFileIpc();
+    const content = 'a'.repeat(64 * 1024 - 1) + '😀é';
+    await fs.writeFile(reportPath, content);
+    await publish([reportPath]);
+    await invoke('copy-artifact-contents', 7, reportPath);
+    expect(clipboard.writeText).toHaveBeenCalledWith(content);
+    vi.mocked(clipboard.writeText).mockClear();
+    for (const suffix of [new Uint8Array([0xe2, 0x82]), new Uint8Array([0])]) {
+      await fs.writeFile(reportPath, content);
+      await fs.appendFile(reportPath, suffix);
+      await expect(invoke('copy-artifact-contents', 7, reportPath)).rejects.toThrow('UTF-8');
+      expect(clipboard.writeText).not.toHaveBeenCalled();
+    }
+  });
+
   it('copies an empty text file successfully', async () => {
     const { invoke, publish, reportPath } = await createMainFileIpc();
     await fs.writeFile(reportPath, '');

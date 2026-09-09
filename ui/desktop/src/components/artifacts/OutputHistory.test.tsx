@@ -80,6 +80,51 @@ describe('OutputHistory', () => {
     expect(restoreOutputRevision).not.toHaveBeenCalled();
   });
 
+  it.each(['\n', '\r\n'])(
+    'hides a formatted managed footer using %j line endings',
+    async (newline) => {
+      const content = [
+        'Report body',
+        '',
+        '<!-- gosling:output-history:start -->  ',
+        'History table',
+        '<!-- gosling:output-history:end -->',
+        '  ',
+        '',
+      ].join(newline);
+      vi.mocked(getOutputRevision).mockResolvedValue({
+        revision: revision(2),
+        contentBase64: window.btoa(content),
+        currentHash: 'hash',
+      });
+      show();
+      fireEvent.click(screen.getByRole('button', { name: 'History' }));
+      expect(await screen.findByText('Report body')).toBeInTheDocument();
+      expect(screen.queryByText(/History table/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Export revision' }));
+      await waitFor(() =>
+        expect(save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            source: { type: 'content', encoding: 'base64', content: window.btoa(content) },
+          })
+        )
+      );
+    }
+  );
+
+  it('preserves an incomplete footer in the preview', async () => {
+    vi.mocked(getOutputRevision).mockResolvedValue({
+      revision: revision(2),
+      contentBase64: window.btoa(
+        'Report body\n\n<!-- gosling:output-history:start -->\nUnfinished history'
+      ),
+      currentHash: 'hash',
+    });
+    show();
+    fireEvent.click(screen.getByRole('button', { name: 'History' }));
+    expect(await screen.findByText(/Unfinished history/)).toBeInTheDocument();
+  });
+
   it('exports the exact selected revision bytes', async () => {
     show();
     fireEvent.click(screen.getByRole('button', { name: 'History' }));

@@ -453,8 +453,7 @@ impl SessionManager {
             );
             insert_revision(&mut tx, &path, &baseline, &current.bytes).await?;
         }
-        tx.commit().await?;
-        let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+        // Baseline and restore must both roll back if the file cannot be replaced.
         let mut history = history_in_tx(&mut tx, &path).await?;
         let body = markdown_body(&path, &content);
         let next = revision(

@@ -183,11 +183,22 @@ pub(crate) fn read_snapshot(path: &Path) -> Result<Option<OutputSnapshot>> {
 }
 
 pub(crate) fn markdown_body(path: &Path, bytes: &[u8]) -> Vec<u8> {
+    static FOOTER_START: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"\r?\n[ \t]*\r?\n[ \t]*<!-- gosling:output-history:start -->[ \t]*\r?\n")
+            .unwrap()
+    });
     if is_markdown(path) {
         if let Ok(text) = std::str::from_utf8(bytes) {
-            if text.ends_with(HISTORY_END) {
-                if let Some((body, _)) = text.rsplit_once(HISTORY_START) {
-                    return body.as_bytes().to_vec();
+            if let Some(footer) = FOOTER_START.find_iter(text).last() {
+                if text
+                    .split_at(footer.end())
+                    .1
+                    .trim_end()
+                    .strip_suffix(HISTORY_END.trim_end())
+                    .is_some_and(|history| history.trim_end_matches([' ', '\t']).ends_with('\n'))
+                {
+                    // Match editor-formatted delimiters without normalizing the document body.
+                    return bytes[..footer.start()].to_vec();
                 }
             }
         }
@@ -306,4 +317,39 @@ pub(crate) fn scan_output_roots(roots: &[PathBuf]) -> Result<BTreeSet<PathBuf>> 
         }
     }
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markdown_footer_parsing_preserves_body_bytes_and_earlier_markers() {
+        let body = "# Résumé\r\n\r\n<!-- gosling:output-history:start -->\r\nExample, not the final footer.\r\n";
+        for newline in ["\n", "\r\n"] {
+            for trailing in ["", "  ", "\n\n", " \r\n\t"] {
+                let footer = format!("{newline} \t{newline}<!-- gosling:output-history:start -->  {newline}Table{newline}  <!-- gosling:output-history:end -->{trailing}");
+                let text = format!("{body}{footer}");
+                assert_eq!(
+                    markdown_body(Path::new("report.md"), text.as_bytes()),
+                    body.as_bytes()
+                );
+                assert_eq!(
+                    markdown_body(Path::new("report.txt"), text.as_bytes()),
+                    text.as_bytes()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn incomplete_or_nonterminal_history_is_document_content() {
+        for text in [
+            "Body\n\n<!-- gosling:output-history:start -->\nUnfinished",
+            "Body\n\n<!-- gosling:output-history:start -->\nTable\n<!-- gosling:output-history:end -->\nUser appendix",
+            "Body\n\n<!-- gosling:output-history:start -->\nTable <!-- gosling:output-history:end -->\n",
+        ] {
+            assert_eq!(markdown_body(Path::new("report.md"), text.as_bytes()), text.as_bytes());
+        }
+    }
 }

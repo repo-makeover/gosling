@@ -967,25 +967,33 @@ describe('ArtifactPane', () => {
     );
   });
 
-  it('deletes an output from its row and closes its preview only after Trash succeeds', async () => {
-    render(
-      <IntlTestWrapper>
-        <ArtifactWorkbenchProvider>
-          <Harness />
-        </ArtifactWorkbenchProvider>
-      </IntlTestWrapper>
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Load mixed outputs' }));
-    fireEvent.click(screen.getByTitle('/outputs/report.md'));
-    fireEvent.click(screen.getByRole('button', { name: 'Delete report.md' }));
-    expect(screen.getByTitle('/outputs/report.md')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'Outputs 1' })).toBeInTheDocument());
-    expect(trashArtifactFiles).toHaveBeenCalledWith(['/outputs/report.md']);
-    expect(screen.queryByTitle('/outputs/report.md')).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Close report.md')).not.toBeInTheDocument();
-    expect(screen.getByTitle('/outputs/brief.docx')).toBeInTheDocument();
-  });
+  it.each(['trashed', 'missing'] as const)(
+    'dismisses an output and closes its preview after %s acknowledgement',
+    async (status) => {
+      trashArtifactFiles.mockImplementation(async (paths: string[]) =>
+        paths.map((path) => ({ path, status }))
+      );
+      render(
+        <IntlTestWrapper>
+          <ArtifactWorkbenchProvider>
+            <Harness />
+          </ArtifactWorkbenchProvider>
+        </IntlTestWrapper>
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Load mixed outputs' }));
+      fireEvent.click(screen.getByTitle('/outputs/report.md'));
+      fireEvent.click(screen.getByRole('button', { name: 'Delete report.md' }));
+      expect(screen.getByTitle('/outputs/report.md')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Move to Trash' }));
+      await waitFor(() =>
+        expect(screen.getByRole('tab', { name: 'Outputs 1' })).toBeInTheDocument()
+      );
+      expect(trashArtifactFiles).toHaveBeenCalledWith(['/outputs/report.md']);
+      expect(screen.queryByTitle('/outputs/report.md')).not.toBeInTheDocument();
+      expect(screen.queryByTitle('Close report.md')).not.toBeInTheDocument();
+      expect(screen.getByTitle('/outputs/brief.docx')).toBeInTheDocument();
+    }
+  );
 
   it('keeps failed Library batch selections and errors through the post-delete refresh', async () => {
     const files = ['one.md', 'two.md'].map((name) => ({

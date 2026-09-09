@@ -747,3 +747,76 @@ async fn schema_31_upgrade_preserves_existing_sessions() {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+#[tokio::test]
+async fn editor_formatted_markdown_history_is_not_duplicated() {
+    for (newline, trailing) in [("\n", "\n\n"), ("\r\n", " \r\n\t"), ("\n", "   ")] {
+        let fixture = Fixture::new().await;
+        fixture
+            .write(&fixture.session, "first", "model-a", "Original")
+            .await;
+        let formatted = fs::read_to_string(&fixture.path)
+            .unwrap()
+            .replace('\n', newline)
+            + trailing;
+        fs::write(&fixture.path, &formatted).unwrap();
+        fixture
+            .write(&fixture.session, "same", "model-b", &formatted)
+            .await;
+        assert_eq!(
+            fixture.history().await.len(),
+            1,
+            "footer-only changes are not revisions"
+        );
+        let edited = formatted.replacen("Original", "Edited", 1);
+        fixture
+            .write(&fixture.session, "edit", "model-b", &edited)
+            .await;
+        let report = fs::read_to_string(&fixture.path).unwrap();
+        assert_eq!(report.matches("gosling:output-history:start").count(), 1);
+        assert_eq!(fixture.history().await.len(), 2);
+        assert!(report.starts_with("Edited\n\n<!--"));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn failed_restore_does_not_commit_the_external_edit_baseline() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new().await;
+    fixture
+        .write(&fixture.session, "first", "model-a", "Original")
+        .await;
+    fs::write(&fixture.path, "External edit").unwrap();
+    let current = fixture.get(1).await;
+    let directory = fixture.path.parent().unwrap();
+    let permissions = fs::metadata(directory).unwrap().permissions();
+    fs::set_permissions(directory, fs::Permissions::from_mode(0o555)).unwrap();
+    let result = fixture
+        .manager
+        .restore_output_revision(RestoreOutputRevisionRequest {
+            session_id: fixture.session.id.clone(),
+            path: fixture.path.to_string_lossy().into(),
+            version: 1,
+            expected_current_hash: current.current_hash.unwrap(),
+        })
+        .await;
+    fs::set_permissions(directory, permissions).unwrap();
+    assert!(
+        result.is_err(),
+        "restore must fail in an unwritable directory"
+    );
+    assert_eq!(fs::read_to_string(&fixture.path).unwrap(), "External edit");
+    assert_eq!(fixture.history().await.len(), 1);
+    let reopened = SessionManager::new(fixture.temp.path().join("state"));
+    let history = reopened
+        .list_output_revisions(ListOutputRevisionsRequest {
+            session_id: fixture.session.id.clone(),
+            path: fixture.path.to_string_lossy().into(),
+            before_version: None,
+            limit: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(history.revisions.len(), 1);
+}

@@ -45,6 +45,7 @@ for the relationship to cephalopod-ai/gosling.
 - [build/](build/) — build documentation
 - [build/context-compaction-failsafe-plan.md](build/context-compaction-failsafe-plan.md) — recurring oversized-session compaction repair plan and acceptance criteria
 - [cloud/](cloud/) — audit and playtest reports (not cloud-hosting runbooks)
+- [cloud/2026-09-08-system-surface-audit.md](cloud/2026-09-08-system-surface-audit.md) — 2026-09-08 independent multi-lens system, reliability, and dataflow surface audit
 - [cloud/2026-08-26-clean-independent-audit.md](cloud/2026-08-26-clean-independent-audit.md) — 2026-08-26 clean independent multi-lens system audit, with a later targeted High-severity repair closure
 - [cloud/2026-08-15-master-report.md](cloud/2026-08-15-master-report.md) — 2026-08-15 exhaustive multi-lens audit + 110-card playtest merge
 - [cloud/2026-08-15-live-all-scenarios-playtest.md](cloud/2026-08-15-live-all-scenarios-playtest.md) — live playtest ledger for that pass

@@ -59,6 +59,8 @@ impl GoslingAcpAgent {
             updates.push((def.config_key.to_string(), value));
         }
 
+        validate_compaction_preferences(config, &updates)?;
+
         config.set_param_values(&updates).internal_err()?;
         Ok(EmptyResponse {})
     }
@@ -68,6 +70,17 @@ impl GoslingAcpAgent {
         req: PreferencesRemoveRequest,
     ) -> Result<EmptyResponse, agent_client_protocol::Error> {
         let config = self.config()?;
+        let removals = req
+            .keys
+            .iter()
+            .map(|key| {
+                Ok((
+                    preference_def(*key)?.config_key.to_string(),
+                    serde_json::Value::Null,
+                ))
+            })
+            .collect::<Result<Vec<_>, agent_client_protocol::Error>>()?;
+        validate_compaction_preferences(config, &removals)?;
         for key in req.keys {
             let def = preference_def(key)?;
             config.delete(def.config_key).internal_err()?;
@@ -299,6 +312,41 @@ fn preference_def(
             agent_client_protocol::Error::internal_error()
                 .data(format!("Missing preference definition for {key:?}"))
         })
+}
+
+// Null updates represent removals, which restore the runtime default for that preference.
+fn validate_compaction_preferences(
+    config: &Config,
+    updates: &[(String, serde_json::Value)],
+) -> Result<(), agent_client_protocol::Error> {
+    const THRESHOLD: &str = "GOSLING_AUTO_COMPACT_THRESHOLD";
+    const REDUCTION: &str = "GOSLING_AUTO_COMPACT_REDUCTION";
+    if !updates
+        .iter()
+        .any(|(key, _)| key == THRESHOLD || key == REDUCTION)
+    {
+        return Ok(());
+    }
+    let resulting_value = |key: &str, default: f64| {
+        updates
+            .iter()
+            .rev()
+            .find(|(name, _)| name == key)
+            .map_or_else(
+                || config.get_param::<f64>(key).unwrap_or(default),
+                |(_, value)| value.as_f64().unwrap_or(default),
+            )
+    };
+    let threshold = resulting_value(THRESHOLD, crate::context_mgmt::DEFAULT_COMPACTION_THRESHOLD);
+    let reduction = resulting_value(
+        REDUCTION,
+        crate::context_mgmt::DEFAULT_AUTO_COMPACT_REDUCTION,
+    );
+    if reduction > 0.0 && reduction >= threshold {
+        return Err(agent_client_protocol::Error::invalid_params()
+            .data("autoCompactReduction must be less than autoCompactThreshold (or 0 for full compaction)"));
+    }
+    Ok(())
 }
 
 fn prepare_auto_compact_threshold(

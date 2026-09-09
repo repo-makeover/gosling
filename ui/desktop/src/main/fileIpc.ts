@@ -345,12 +345,28 @@ export function registerFileIpcHandlers(
             'Copy contents supports text files up to 20 MiB. Save a copy for larger files.'
           );
         }
-        const buffer = Buffer.alloc(stats.size + 1);
+        const buffer = Buffer.alloc(Math.min(stats.size + 1, 64 * 1024));
+        const decoder = new TextDecoder('utf-8', { fatal: true });
+        const chunks: string[] = [];
         let total = 0;
-        while (total < buffer.length) {
-          const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+        while (total <= stats.size) {
+          const { bytesRead } = await handle.read(
+            buffer,
+            0,
+            Math.min(buffer.length, stats.size + 1 - total),
+            total
+          );
           if (bytesRead === 0) break;
           total += bytesRead;
+          const contents = buffer.subarray(0, bytesRead);
+          if (contents.includes(0))
+            throw new Error('Copy contents supports UTF-8 text files only.');
+          try {
+            // Streaming preserves multibyte characters split across reads and rejects binary early.
+            chunks.push(decoder.decode(contents, { stream: true }));
+          } catch {
+            throw new Error('Copy contents supports UTF-8 text files only.');
+          }
         }
         const current = await handle.stat();
         if (
@@ -360,15 +376,12 @@ export function registerFileIpcHandlers(
         ) {
           throw new Error('The file changed while copying. Try again.');
         }
-        const contents = buffer.subarray(0, total);
-        if (contents.includes(0)) throw new Error('Copy contents supports UTF-8 text files only.');
-        let text: string;
         try {
-          text = new TextDecoder('utf-8', { fatal: true }).decode(contents);
+          chunks.push(decoder.decode());
         } catch {
           throw new Error('Copy contents supports UTF-8 text files only.');
         }
-        clipboard.writeText(text);
+        clipboard.writeText(chunks.join(''));
       } finally {
         await handle.close();
       }

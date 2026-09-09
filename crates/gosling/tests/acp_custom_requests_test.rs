@@ -860,6 +860,136 @@ fn test_custom_preferences_read_save_auto_compact_reduction() {
 
 #[test]
 #[serial]
+fn test_custom_preferences_validate_resulting_compaction_pair() {
+    let config_dir = write_acp_global_config(DEFAULT_ACP_TEST_CONFIG);
+    run_test(async move {
+        let openai = OpenAiFixture::new(vec![], Arc::new(EnforceSessionId::default())).await;
+        let conn = AcpServerConnection::new(
+            TestConnectionConfig {
+                data_root: config_dir,
+                ..Default::default()
+            },
+            openai,
+        )
+        .await;
+        for values in [
+            serde_json::json!([{ "key": "autoCompactReduction", "value": 0.8 }]),
+            serde_json::json!([{ "key": "autoCompactThreshold", "value": 0.15 }]),
+            serde_json::json!([
+                { "key": "autoCompactThreshold", "value": 0.5 },
+                { "key": "autoCompactReduction", "value": 0.6 }
+            ]),
+        ] {
+            assert!(send_custom(
+                conn.cx(),
+                "_gosling/unstable/preferences/save",
+                serde_json::json!({"values": values})
+            )
+            .await
+            .is_err());
+        }
+        let response = send_custom(
+            conn.cx(),
+            "_gosling/unstable/preferences/read",
+            serde_json::json!({"keys": ["autoCompactThreshold", "autoCompactReduction"]}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            response.get("values"),
+            Some(&serde_json::json!([
+                {"key": "autoCompactThreshold", "value": null},
+                {"key": "autoCompactReduction", "value": null}
+            ]))
+        );
+        for values in [
+            serde_json::json!([
+                { "key": "autoCompactThreshold", "value": 0.1 },
+                { "key": "autoCompactReduction", "value": 0.0 }
+            ]),
+            serde_json::json!([
+                { "key": "autoCompactReduction", "value": 0.2 },
+                { "key": "autoCompactThreshold", "value": 0.3 }
+            ]),
+        ] {
+            send_custom(
+                conn.cx(),
+                "_gosling/unstable/preferences/save",
+                serde_json::json!({"values": values}),
+            )
+            .await
+            .unwrap();
+        }
+        for values in [
+            serde_json::json!([{ "key": "autoCompactThreshold", "value": 0.2 }]),
+            serde_json::json!([{ "key": "autoCompactReduction", "value": 0.3 }]),
+        ] {
+            assert!(send_custom(
+                conn.cx(),
+                "_gosling/unstable/preferences/save",
+                serde_json::json!({"values": values})
+            )
+            .await
+            .is_err());
+        }
+        let response = send_custom(
+            conn.cx(),
+            "_gosling/unstable/preferences/read",
+            serde_json::json!({"keys": ["autoCompactThreshold", "autoCompactReduction"]}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            response.get("values"),
+            Some(&serde_json::json!([
+                {"key": "autoCompactThreshold", "value": 0.3},
+                {"key": "autoCompactReduction", "value": 0.2}
+            ]))
+        );
+        send_custom(
+            conn.cx(),
+            "_gosling/unstable/preferences/save",
+            serde_json::json!({
+                "values": [
+                    {"key": "autoCompactThreshold", "value": 0.1},
+                    {"key": "autoCompactReduction", "value": 0.0}
+                ]
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(send_custom(
+            conn.cx(),
+            "_gosling/unstable/preferences/remove",
+            serde_json::json!({"keys": ["autoCompactReduction"]})
+        )
+        .await
+        .is_err());
+        let response = send_custom(
+            conn.cx(),
+            "_gosling/unstable/preferences/read",
+            serde_json::json!({"keys": ["autoCompactReduction"]}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            response.get("values"),
+            Some(&serde_json::json!([
+                {"key": "autoCompactReduction", "value": 0.0}
+            ]))
+        );
+        send_custom(
+            conn.cx(),
+            "_gosling/unstable/preferences/remove",
+            serde_json::json!({"keys": ["autoCompactReduction", "autoCompactThreshold"]}),
+        )
+        .await
+        .unwrap();
+    });
+}
+
+#[test]
+#[serial]
 fn test_custom_preferences_save_rejects_invalid_values() {
     write_acp_global_config(DEFAULT_ACP_TEST_CONFIG);
     run_test(async {

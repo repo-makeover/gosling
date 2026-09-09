@@ -75,9 +75,16 @@ function textPreview(path: string, saved: SavedRevision | null): string | null {
       character.charCodeAt(0)
     );
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    const marker = text.lastIndexOf('\n\n<!-- gosling:output-history:start -->\n');
-    return marker >= 0 && text.endsWith('<!-- gosling:output-history:end -->\n')
-      ? text.slice(0, marker)
+    if (!/\.(md|markdown)$/i.test(path)) return text;
+    const starts = [
+      ...text.matchAll(/\r?\n[ \t]*\r?\n[ \t]*<!-- gosling:output-history:start -->[ \t]*\r?\n/g),
+    ];
+    const footer = starts[starts.length - 1];
+    return footer &&
+      /\n[ \t]*<!-- gosling:output-history:end -->\s*$/.test(
+        text.slice(footer.index + footer[0].length)
+      )
+      ? text.slice(0, footer.index)
       : text;
   } catch {
     return null;
